@@ -7,9 +7,10 @@ import { DEMO_BPM, demoSectionAt, renderDemoTrack } from './demo-track';
 import { Director } from './director';
 import { BarAggregator } from './features';
 import { Renderer } from './render';
-import { resetSceneState, SCENES } from './scenes';
-import { Ui, type TrackInfo } from './ui';
-import type { BeatInfo, RenderInput } from './types';
+import { EFFECTS, onRegistryChange, prewarm, registerEffects, registerScenes, resetSceneState, SCENES, unregister } from './scenes';
+import { exposeGlobalApi, fromFile, MODULE_EXT, SHADER_EXT, type Loaded } from './plugins/loader';
+import { GROUP_LABELS, Ui, type EffectMode, type TrackInfo, type UiCallbacks } from './ui';
+import type { BeatInfo, Effect, RenderInput } from './types';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -53,13 +54,96 @@ function saveFonts(): void {
     /* ignore */
   }
 }
+// ---------------------------------------------------------------- plugins / FX
+const FX_KEY = 'jev-vj.fx';
+const PLUGINS_KEY = 'jev-vj.plugins';
+const fxModes = new Map<string, EffectMode>();
+try {
+  for (const [id, m] of Object.entries(JSON.parse(localStorage.getItem(FX_KEY) ?? '{}') as Record<string, EffectMode>)) fxModes.set(id, m);
+} catch {
+  /* storage unavailable */
+}
+function saveFxModes(): void {
+  try {
+    localStorage.setItem(FX_KEY, JSON.stringify(Object.fromEntries(fxModes)));
+  } catch {
+    /* ignore */
+  }
+}
+/** files added at runtime, kept as source text so they come back after a reload */
+let userPlugins: { name: string; text: string; ids: string[] }[] = [];
+function saveUserPlugins(): void {
+  try {
+    localStorage.setItem(PLUGINS_KEY, JSON.stringify(userPlugins));
+  } catch {
+    logInfo('プラグインの保存に失敗（localStorage の容量）。リロードすると消えます');
+  }
+}
+function registerLoaded(l: Loaded): void {
+  for (const sc of l.scenes) {
+    const err = sc.prepare?.();
+    if (err) logError(`${sc.name}: ${err.split('\n').slice(0, 3).join(' / ')}`);
+  }
+  for (const fx of l.effects) {
+    const err = fx.prepare?.();
+    if (err) logError(`${fx.name}: ${err.split('\n').slice(0, 3).join(' / ')}`);
+  }
+  registerScenes(l.scenes);
+  registerEffects(l.effects);
+}
+async function addPluginText(name: string, text: string, save: boolean): Promise<void> {
+  try {
+    const l = await fromFile(name, text);
+    if (l.scenes.length + l.effects.length === 0) {
+      logError(`${name}: シーン / エフェクトが見つからない`);
+      return;
+    }
+    registerLoaded(l);
+    const ids = [...l.scenes.map((x) => x.id), ...l.effects.map((x) => x.id)];
+    if (save) {
+      userPlugins = [...userPlugins.filter((p) => p.name !== name), { name, text, ids }];
+      saveUserPlugins();
+    } else {
+      const p = userPlugins.find((x) => x.name === name);
+      if (p) p.ids = ids;
+    }
+    if (save) logInfo(`追加: ${[...l.scenes.map((x) => x.name), ...l.effects.map((x) => `FX ${x.name}`)].join(', ')}`);
+  } catch (e) {
+    logError(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+async function loadPluginFiles(files: File[]): Promise<void> {
+  for (const f of files) {
+    if (SHADER_EXT.test(f.name) || MODULE_EXT.test(f.name)) await addPluginText(f.name, await f.text(), true);
+    else if (f.type.startsWith('audio/')) void cbs.playFile(f);
+    else logError(`${f.name}: 未対応の形式（.fs .frag .glsl .isf .js .mjs か音声ファイル）`);
+  }
+}
+exposeGlobalApi((l) => registerLoaded(l));
+
+/** per-frame FX amounts from each effect's mode */
+function effectChain(input: RenderInput): { fx: Effect; amount: number }[] {
+  const out: { fx: Effect; amount: number }[] = [];
+  for (const fx of EFFECTS) {
+    const mode = fxModes.get(fx.id);
+    if (!mode || mode === 'off') continue;
+    const amount =
+      mode === 'on' ? 1 : mode === 'beat' ? input.beatPulse * (0.4 + 0.6 * input.intensity) : Math.max(0, Math.min(1, (input.intensity - 0.3) / 0.5));
+    out.push({ fx, amount });
+  }
+  return out;
+}
+
 let audio: AudioEngine | null = null;
 let userText = '';
 let nowPlaying = '';
 let lastInput: RenderInput = {
   w: 1, h: 1, t: 0, dt: 0, energy: 0, sub: 0, bass: 0, mid: 0, high: 0, beatPhase: 0, beatPulse: 0, barPhase: 0, onset: false,
   intensity: 0, palette: { bg: '#000', a: '#fff', b: '#888', c: '#444' }, wave: new Float32Array(2048),
+  spectrum: new Uint8Array(1024), bar: 0, beat: 0, bpm: 0,
 };
+const SILENT_WAVE = new Float32Array(2048);
+const SILENT_SPECTRUM = new Uint8Array(1024);
 let demoBuffer: AudioBuffer | null = null;
 let lastFrameT = performance.now();
 let lastBeat: BeatInfo = { bpm: 0, confidence: 0, beatPhase: 0, barPhase: 0, beatInBar: 0, bar: 0, beatPulse: 0, locked: false };
@@ -70,6 +154,7 @@ let autoAdvance = true;
 /** set as soon as the user starts a source; a pending auto-resume then stands down */
 let userStarted = false;
 const logInfo = (text: string): void => director.onLog?.({ t: performance.now(), kind: 'info', text });
+const logError = (text: string): void => director.onLog?.({ t: performance.now(), kind: 'error', text });
 
 function ensureAudio(): AudioEngine {
   if (audio) return audio;
@@ -146,7 +231,7 @@ beat.onBar = (info) => {
   director.onBar(info.bar, elapsed());
 };
 
-const ui = new Ui({
+const cbs: UiCallbacks = {
   async playDemo() {
     userStarted = true;
     const a = ensureAudio();
@@ -235,7 +320,22 @@ const ui = new Ui({
     set.clear();
     if (kind !== 'all') for (const sc of SCENES) if (sc.group === kind) set.add(sc.id);
     ui.setEnabledScenes(set);
-    ui.log({ t: performance.now(), kind: 'info', text: `素材セット: ${kind === 'all' ? 'すべて' : kind === 'hina' ? 'ひな祭り' : kind.toUpperCase()}（${director.candidates().length} scenes）` });
+    ui.log({ t: performance.now(), kind: 'info', text: `素材セット: ${kind === 'all' ? 'すべて' : (GROUP_LABELS[kind] ?? kind)}（${director.candidates().length} scenes）` });
+  },
+  loadPlugins(files) {
+    void loadPluginFiles(files);
+  },
+  removePlugin(id) {
+    unregister(id);
+    fxModes.delete(id);
+    saveFxModes();
+    userPlugins = userPlugins.filter((p) => !p.ids.includes(id));
+    saveUserPlugins();
+  },
+  setEffectMode(id, mode) {
+    if (mode === 'off') fxModes.delete(id);
+    else fxModes.set(id, mode);
+    saveFxModes();
   },
   async setFont(which, family) {
     fonts[which] = family;
@@ -301,7 +401,8 @@ const ui = new Ui({
     director.state.paused = !director.state.paused;
     return director.state.paused;
   },
-});
+};
+const ui = new Ui(cbs);
 
 function updateContext(): void {
   director.userContext = [userText.trim(), nowPlaying].filter(Boolean).join('。');
@@ -312,6 +413,40 @@ director.onLog = (e) => {
   terminal.push(e);
 };
 ui.setScenes(SCENES);
+ui.setEffects(EFFECTS, fxModes);
+onRegistryChange(() => {
+  director.refreshScenes();
+  ui.setScenes(SCENES);
+  ui.setEnabledScenes(director.enabledScenes);
+  ui.setActiveScene(director.state.scene.id);
+  ui.setEffects(EFFECTS, fxModes);
+});
+// restore runtime plugins, then compile every shader in idle time (no stall on the first cut)
+void (async () => {
+  try {
+    userPlugins = JSON.parse(localStorage.getItem(PLUGINS_KEY) ?? '[]') as typeof userPlugins;
+  } catch {
+    userPlugins = [];
+  }
+  for (const p of userPlugins) await addPluginText(p.name, p.text, false);
+  prewarm((failed) => {
+    for (const f of failed) logError(`${f.id}: コンパイル失敗 ${f.error.split('\n')[0]}`);
+  });
+})();
+// drag & drop: shaders / plugins / audio anywhere on the page
+window.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.body.classList.add('dropping');
+});
+window.addEventListener('dragleave', (e) => {
+  if (e.relatedTarget === null) document.body.classList.remove('dropping');
+});
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('dropping');
+  const files = [...(e.dataTransfer?.files ?? [])];
+  if (files.length) void loadPluginFiles(files);
+});
 director.onDeliberation = (d) => ui.showDeliberation(d);
 director.onLogo = (show) => (show ? logo.show(performance.now()) : logo.hide(performance.now()));
 window.addEventListener('keydown', (e) => {
@@ -565,9 +700,13 @@ function frame(now: number): void {
       onset: f?.onset ?? false,
       intensity: s.intensity,
       palette: s.palette,
-      wave: f?.wave ?? new Float32Array(2048),
+      wave: f?.wave ?? SILENT_WAVE,
+      spectrum: f?.spectrum ?? SILENT_SPECTRUM,
+      bar: lastBeat.bar,
+      beat: lastBeat.bar * 4 + lastBeat.beatInBar,
+      bpm: lastBeat.bpm,
   };
-  renderer.draw(lastInput, s.scene, s.transition, s.flash);
+  renderer.draw(lastInput, s.scene, s.transition, s.flash, effectChain(lastInput));
   renderer.clearOverlay();
   const dots = [0, 1, 2, 3].map((i) => (i === lastBeat.beatInBar ? '●' : '○')).join('');
   terminal.status = f

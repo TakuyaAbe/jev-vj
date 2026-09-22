@@ -84,5 +84,13 @@ textarea {
 .scene-item.g-hina button { border-color: #a3557a; }
 .scene-item.g-gl button { border-color: #3a5a7a; }
 .scene-item .key { width: 10px; text-align: right; }
+.scene-item.g-isf button, .scene-item.g-shadertoy button { border-color: #6a5a2a; }
+.scene-item.g-user button { border-color: #2a6a4a; }
+.scene-item.broken button:not(.rm), .fx-item.broken .fxname { text-decoration: line-through; color: #f2a0a0; }
+.scene-item button.rm, .fx-item button.rm { flex: 0 0 auto; padding: 1px 5px; color: var(--dim); }
+.fxlist { display: flex; flex-direction: column; gap: 3px; }
+.fx-item { display: flex; align-items: center; gap: 6px; }
+.fx-item .fxname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.dropping::after { content: 'ドロップしてシェーダー / プラグイン / 音源を追加'; position: fixed; inset: 16px; border: 2px dashed var(--acc); border-radius: 8px; display: grid; place-items: center; color: var(--acc); font-size: 18px; background: rgba(0, 0, 0, 0.5); pointer-events: none; z-index: 10; }
 pre.json { font-size: 10px; line-height: 1.35; max-height: 260px; overflow: auto; background: #0c0c14; border: 1px solid var(--line); border-radius: 4px; padding: 6px; margin: 2px 0 6px; white-space: pre-wrap; word-break: break-all; }
 details > summary { cursor: pointer; }

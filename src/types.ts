@@ -18,6 +18,8 @@ export interface FrameFeatures {
   bassFlux: number;
   onset: boolean;
   wave: Float32Array;
+  /** smoothed FFT magnitudes as bytes (like AnalyserNode.getByteFrequencyData), 1024 bins up to Nyquist */
+  spectrum: Uint8Array;
 }
 
 export interface BeatInfo {
@@ -50,24 +52,10 @@ export interface BarSummary {
   onsets: number;
 }
 
-export type SceneId =
-  | 'particles'
-  | 'tunnel'
-  | 'grid'
-  | 'strobe'
-  | 'kaleido'
-  | 'waves'
-  | 'warp'
-  | 'lattice'
-  | 'julia'
-  | 'voronoi'
-  | 'galaxy'
-  | 'terrain'
-  | 'hina_petals'
-  | 'hina_dan'
-  | 'hina_mochi'
-  | 'seigaiha'
-  | 'hina_dan3d';
+/** Built-in ids plus any plugin id (ISF / Shadertoy / GLSL / three.js / canvas files). */
+export type SceneId = string;
+/** picker grouping. Known: '2d' canvas, 'gl' shader / three.js, 'hina' ひな祭り素材, 'isf', 'shadertoy', 'user' (dropped at runtime) */
+export type SceneGroup = string;
 export type PaletteId = 'warm' | 'cold' | 'neon' | 'mono' | 'acid' | 'hina';
 export type TransitionId = 'cut' | 'crossfade' | 'flash';
 export type PhaseId = 'intro' | 'build' | 'drop' | 'breakdown' | 'steady' | 'outro';
@@ -97,6 +85,12 @@ export interface RenderInput {
   intensity: number;
   palette: Palette;
   wave: Float32Array;
+  /** 1024-bin FFT bytes (0..255), smoothed like Shadertoy's audio input */
+  spectrum: Uint8Array;
+  /** monotone bar / beat counters and tempo from the beat tracker */
+  bar: number;
+  beat: number;
+  bpm: number;
 }
 
 export interface Scene {
@@ -106,7 +100,30 @@ export interface Scene {
   description: string;
   /** code-side cap: force a switch after this many bars (default 32) */
   maxBars?: number;
-  /** picker grouping: '2d' canvas, 'gl' shader / three.js, 'hina' ひな祭り素材 */
-  group: '2d' | 'gl' | 'hina';
+  group: SceneGroup;
+  /** ~30-character criterion sent to Jev instead of the full description */
+  short?: string;
+  /** where it came from: bundled plugin file path or dropped file name (built-ins leave it unset) */
+  source?: string;
+  /** set when the scene failed to compile; the director skips it */
+  error?: string;
   render(ctx: CanvasRenderingContext2D, input: RenderInput): void;
+  /** clear per-set state (particles, feedback buffers) on a fresh start */
+  reset?(): void;
+  /** build GPU resources / compile shaders ahead of time; returns an error message or null */
+  prepare?(): string | null;
+}
+
+/** A post-process over the whole stage (ISF filters, canvas effects). */
+export interface Effect {
+  id: string;
+  name: string;
+  description: string;
+  short?: string;
+  source?: string;
+  error?: string;
+  /** process the stage in place; amount 0..1 is the wet mix / strength */
+  apply(ctx: CanvasRenderingContext2D, input: RenderInput, amount: number): void;
+  reset?(): void;
+  prepare?(): string | null;
 }

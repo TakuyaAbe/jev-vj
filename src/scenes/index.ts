@@ -1,6 +1,10 @@
-import type { Palette, PaletteId, RenderInput, Scene, SceneId } from '../types';
+import type { Palette, PaletteId, RenderInput, Scene } from '../types';
 import { GL_SCENES } from '../gl/scenes';
 import { HINA_2D } from './hina';
+import { bundledPlugins } from '../plugins/loader';
+import { EFFECTS, registerEffects, registerScenes, SCENES } from './registry';
+
+export { EFFECTS, SCENES, SCENE_BY_ID, sceneById, onRegistryChange, registerScenes, registerEffects, unregister, usableScenes, prewarm } from './registry';
 
 export const PALETTES: Record<PaletteId, Palette> = {
   warm: { bg: '#12060a', a: '#ff4d2e', b: '#ffb020', c: '#ffe8c0' },
@@ -335,11 +339,17 @@ const waves: Scene = {
   },
 };
 
-export const SCENES: Scene[] = [particles, tunnel, grid, strobe, kaleido, waves, ...GL_SCENES, ...HINA_2D];
-export const SCENE_BY_ID: Record<SceneId, Scene> = Object.fromEntries(SCENES.map((s) => [s.id, s])) as Record<SceneId, Scene>;
+registerScenes([particles, tunnel, grid, strobe, kaleido, waves, ...GL_SCENES, ...HINA_2D], true);
+/** src/plugins/**: ISF / Shadertoy / GLSL files and *.scene.ts modules */
+export const BUNDLED = bundledPlugins();
+registerScenes(BUNDLED.scenes, true);
+registerEffects(BUNDLED.effects, true);
+for (const f of BUNDLED.failed) console.warn(`[jev-vj] plugin ${f.path}: ${f.error}`);
 
 export function resetSceneState(): void {
   parts.length = 0;
   gridLit.clear();
   tunnelZ = 0;
+  for (const sc of SCENES) sc.reset?.();
+  for (const fx of EFFECTS) fx.reset?.();
 }

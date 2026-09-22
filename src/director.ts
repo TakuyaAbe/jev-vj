@@ -1,6 +1,6 @@
 import type { BarAggregator, Jump } from './features';
 import { buildQuestions, buildState, callJev, UNITS, type JevAnswers, type JevResult, type SetContext, type Unit, type UnitId } from './jev';
-import { PALETTES, SCENE_BY_ID, SCENES } from './scenes';
+import { PALETTES, SCENES, sceneById } from './scenes';
 import type { Palette, PaletteId, PhaseId, Scene, SceneId, TransitionId } from './types';
 
 export type DecisionReason = 'interval' | 'change:drop' | 'change:cut' | 'manual' | 'start';
@@ -184,7 +184,7 @@ export class Director {
   onLogo: ((show: boolean) => void) | null = null;
 
   constructor(private readonly agg: BarAggregator) {
-    const scene = SCENE_BY_ID.particles;
+    const scene = sceneById('particles');
     this.paletteFrom = PALETTES.cold;
     this.state = {
       scene,
@@ -262,8 +262,17 @@ export class Director {
 
   /** The candidate scenes for the next deliberation. */
   candidates(): Scene[] {
-    const c = SCENES.filter((sc) => this.enabledScenes.has(sc.id));
-    return c.length > 0 ? c : SCENES;
+    const ok = SCENES.filter((sc) => !sc.error);
+    const c = ok.filter((sc) => this.enabledScenes.has(sc.id));
+    return c.length > 0 ? c : ok;
+  }
+
+  /** A scene was re-registered under the same id (hot reload / re-dropped file): point at the new object. */
+  refreshScenes(): void {
+    const s = this.state;
+    s.scene = sceneById(s.scene.id);
+    if (s.transition) s.transition.to = sceneById(s.transition.to.id);
+    for (const id of [...this.enabledScenes]) if (!SCENES.some((sc) => sc.id === id)) this.enabledScenes.delete(id);
   }
 
   /** VJ override: cut now and hold for a few bars so the council does not undo it at once. */
@@ -272,7 +281,7 @@ export class Director {
     if (s.scene.id === id) return;
     this.switchTo(id, 'cut', '手動', bar);
     this.holdUntilBar = bar + 8;
-    this.log('switch', `手動 → ${SCENE_BY_ID[id].name}（8小節ホールド）`);
+    this.log('switch', `手動 → ${sceneById(id).name}（8小節ホールド）`);
   }
 
   setBpm(bpm: number): void {
@@ -459,7 +468,7 @@ export class Director {
     }
     this.log(
       'jev',
-      `合議 :: ${a.phase.choice}(${a.phase.probabilities[a.phase.choice].toFixed(2)}) scene=${a.scene.choice}(${a.scene.probabilities[a.scene.choice].toFixed(2)}) switch=${a.switch_now.noul.toFixed(2)} int=${a.intensity.score.toFixed(1)} pal=${a.palette.choice} drop_soon=${a.drop_soon.noul.toFixed(2)} kime=${a.kime.noul.toFixed(2)} tokens=${r.usage.input_tokens} next+${(a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed ? Math.max(s.intervalBars, 4) : s.intervalBars}`,
+      `合議 :: ${a.phase.choice}(${a.phase.probabilities[a.phase.choice].toFixed(2)}) scene=${a.scene.choice}(${(a.scene.probabilities[a.scene.choice] ?? 0).toFixed(2)}) switch=${a.switch_now.noul.toFixed(2)} int=${a.intensity.score.toFixed(1)} pal=${a.palette.choice} drop_soon=${a.drop_soon.noul.toFixed(2)} kime=${a.kime.noul.toFixed(2)} tokens=${r.usage.input_tokens} next+${(a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed ? Math.max(s.intervalBars, 4) : s.intervalBars}`,
     );
 
     // arm the speculative drop scene (and whether the drop is the 決め場)
@@ -479,7 +488,7 @@ export class Director {
     const switchVotes = d.units.filter((u) => u.proposal !== null && u.proposal !== 'keep').length;
     const majoritySwitch = switchVotes * 2 > d.units.length;
     let target: SceneId | null = null;
-    if (a.scene.choice !== s.scene.id && (majoritySwitch || a.switch_now.noul >= 0.5 || (age >= 16 && a.switch_now.noul >= 0.3) || age >= maxAge || a.scene.probabilities[a.scene.choice] >= 0.7)) {
+    if (a.scene.choice !== s.scene.id && (majoritySwitch || a.switch_now.noul >= 0.5 || (age >= 16 && a.switch_now.noul >= 0.3) || age >= maxAge || (a.scene.probabilities[a.scene.choice] ?? 0) >= 0.7)) {
       target = a.scene.choice;
     } else if (a.scene.choice === s.scene.id && (a.switch_now.noul >= 0.7 || age >= maxAge)) {
       const runner = (Object.entries(a.scene.probabilities) as [SceneId, number][])
@@ -500,13 +509,13 @@ export class Director {
       const kind: TransitionId = reason === 'change:drop' ? 'cut' : a.transition.choice;
       d.outcome = 'approved';
       d.transition = kind;
-      d.note = `${kind} → ${SCENE_BY_ID[target].name}`;
-      this.log('approved', `可決 ${kind} → ${SCENE_BY_ID[target].name}  賛成 ${forCount}/${d.units.length}  (${a.phase.choice}, switch ${a.switch_now.noul.toFixed(2)}, age ${age})`);
+      d.note = `${kind} → ${sceneById(target).name}`;
+      this.log('approved', `可決 ${kind} → ${sceneById(target).name}  賛成 ${forCount}/${d.units.length}  (${a.phase.choice}, switch ${a.switch_now.noul.toFixed(2)}, age ${age})`);
       this.switchTo(target, kind, `${a.phase.choice}, votes ${switchVotes}/${d.units.length}, switch_now=${a.switch_now.noul.toFixed(2)}, age=${age}`, bar);
     } else if (target && blocked) {
       d.outcome = 'rejected';
       d.note = bar < this.holdUntilBar ? 'ホールド中' : s.transition ? '切替中' : '直前に切替済み';
-      this.log('rejected', `否決 ${SCENE_BY_ID[target].name} への切替  賛成 ${forCount}/${d.units.length}  理由: ${d.note}`);
+      this.log('rejected', `否決 ${sceneById(target).name} への切替  賛成 ${forCount}/${d.units.length}  理由: ${d.note}`);
     } else if (switchVotes > 0) {
       d.outcome = 'keep';
       d.note = `${switchVotes}/${d.units.length} が切替を提案、否決`;
@@ -533,7 +542,7 @@ export class Director {
 
   switchTo(id: SceneId, kind: TransitionId, why: string, bar: number): void {
     const s = this.state;
-    const to = SCENE_BY_ID[id];
+    const to = sceneById(id);
     if (to.id === s.scene.id) return;
     this.previousScenes.push(s.scene.id);
     if (this.previousScenes.length > 8) this.previousScenes.shift();
@@ -566,6 +575,15 @@ export class Director {
         c: lerpColor(this.paletteFrom.c, to.c, this.paletteT),
       };
       if (this.paletteT >= 1) s.paletteId = this.targetPalette;
+    }
+    // a plugin that failed to compile or threw while rendering: leave it at once
+    if (s.transition?.to.error) s.transition = null;
+    if (s.scene.error) {
+      const next = this.candidates().find((sc) => sc.id !== s.scene.id);
+      if (next) {
+        this.log('error', `${s.scene.name}: ${s.scene.error.split('\n')[0]} → ${next.name}`);
+        this.switchTo(next.id, 'cut', 'エラー回避', this.sceneStartBar);
+      }
     }
     if (s.transition) {
       s.transition.progress += dt / this.barDuration;

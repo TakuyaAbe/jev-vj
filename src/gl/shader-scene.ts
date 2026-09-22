@@ -15,6 +15,8 @@ export interface ShaderSceneDef {
   name: string;
   description: string;
   maxBars?: number;
+  short?: string;
+  source?: string;
   frag: string;
 }
 
@@ -33,12 +35,20 @@ export function makeShaderScene(def: ShaderSceneDef): Scene {
     scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
   };
 
-  return {
+  const sc: Scene = {
     id: def.id,
     group: def.group,
     name: def.name,
     description: def.description,
     maxBars: def.maxBars,
+    short: def.short,
+    source: def.source,
+    prepare() {
+      ensure();
+      const err = GlContext.get().tryCompile(scene!, camera!);
+      sc.error = err ?? undefined;
+      return err;
+    },
     render(ctx, input) {
       ensure();
       const gl = GlContext.get();
@@ -48,4 +58,5 @@ export function makeShaderScene(def: ShaderSceneDef): Scene {
       gl.blit(ctx, input.w, input.h);
     },
   };
+  return sc;
 }

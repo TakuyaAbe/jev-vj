@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { RenderInput } from '../types';
+import { updateAudioTextures } from './audio-texture';
 
 /** Uniforms shared by every GL scene; updated from RenderInput each frame. */
 export interface AudioUniforms extends Record<string, THREE.IUniform> {
@@ -20,6 +21,11 @@ export interface AudioUniforms extends Record<string, THREE.IUniform> {
   uColB: { value: THREE.Color };
   uColC: { value: THREE.Color };
   uColBg: { value: THREE.Color };
+  /** 512x1 FFT (0..11 kHz) and waveform (centred on 0.5) textures */
+  uFFT: { value: THREE.Texture | null };
+  uWave: { value: THREE.Texture | null };
+  uBar: { value: number };
+  uBpm: { value: number };
 }
 
 export function makeAudioUniforms(): AudioUniforms {
@@ -41,6 +47,10 @@ export function makeAudioUniforms(): AudioUniforms {
     uColB: { value: new THREE.Color('#888888') },
     uColC: { value: new THREE.Color('#444444') },
     uColBg: { value: new THREE.Color('#000000') },
+    uFFT: { value: null },
+    uWave: { value: null },
+    uBar: { value: 0 },
+    uBpm: { value: 0 },
   };
 }
 
@@ -70,4 +80,9 @@ export function updateAudioUniforms(u: AudioUniforms, input: RenderInput, w: num
   u.uColB.value.set(input.palette.b);
   u.uColC.value.set(input.palette.c);
   u.uColBg.value.set(input.palette.bg);
+  const at = updateAudioTextures(input);
+  u.uFFT.value = at.fft;
+  u.uWave.value = at.wave;
+  u.uBar.value = input.bar;
+  u.uBpm.value = input.bpm;
 }

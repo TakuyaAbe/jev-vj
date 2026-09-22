@@ -132,7 +132,7 @@ export const SCENE_SHORT: Partial<Record<SceneId, string>> = {
   hina_dan3d: 'ひな祭り: 七段飾り3D、カメラ回り込み。見せ場・決め場',
 };
 
-export const shortDescription = (sc: Scene): string => SCENE_SHORT[sc.id] ?? sc.description.split('。')[0]!;
+export const shortDescription = (sc: Scene): string => sc.short ?? SCENE_SHORT[sc.id] ?? sc.description.split('。')[0]!;
 
 export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
   warm: '赤〜オレンジ〜琥珀の暖色。熱気、ピーク',

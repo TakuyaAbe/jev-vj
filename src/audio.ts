@@ -27,6 +27,9 @@ export class AudioEngine {
   private readonly wave: Float32Array<ArrayBuffer>;
   private readonly mag: Float32Array;
   private readonly prevMag: Float32Array;
+  /** smoothed dB → byte spectrum for shaders (Shadertoy / ISF audioFFT) */
+  private readonly spectrum: Uint8Array;
+  private readonly specDb: Float32Array;
   private readonly binHz: number;
   private timer: number | null = null;
   private fluxHist: number[] = [];
@@ -54,6 +57,8 @@ export class AudioEngine {
     this.wave = new Float32Array(this.analyser.fftSize);
     this.mag = new Float32Array(n);
     this.prevMag = new Float32Array(n);
+    this.spectrum = new Uint8Array(n);
+    this.specDb = new Float32Array(n).fill(-140);
     this.binHz = this.ctx.sampleRate / this.analyser.fftSize;
   }
 
@@ -208,7 +213,7 @@ export class AudioEngine {
 
   /** Manual tick for tests / hidden tabs. */
   tick(): void {
-    const { analyser, freq, wave, mag, prevMag, binHz } = this;
+    const { analyser, freq, wave, mag, prevMag, binHz, spectrum, specDb } = this;
     analyser.getFloatFrequencyData(freq);
     analyser.getFloatTimeDomainData(wave);
     const n = freq.length;
@@ -223,6 +228,9 @@ export class AudioEngine {
     for (let i = 1; i < n; i++) {
       const hz = i * binHz;
       const db = freq[i]!;
+      // fast attack, ~0.8 release per 20 ms tick: close to AnalyserNode's default smoothing
+      specDb[i] = db > specDb[i]! ? db : specDb[i]! * 0.8 + db * 0.2;
+      spectrum[i] = Math.max(0, Math.min(255, ((specDb[i]! + 100) / 70) * 255));
       const m = db <= -140 ? 0 : Math.pow(10, db / 20);
       mag[i] = m;
       const d = m - prevMag[i]!;
@@ -286,6 +294,7 @@ export class AudioEngine {
       bassFlux,
       onset,
       wave,
+      spectrum,
     };
     this.latest = f;
     this.onFrame?.(f);

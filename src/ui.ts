@@ -1,6 +1,6 @@
 import type { DecisionReason, Deliberation, DirectorState, LogEntry } from './director';
 import type { JevResult } from './jev';
-import type { BeatInfo, FrameFeatures, Scene, SceneId } from './types';
+import type { BeatInfo, Effect, FrameFeatures, Scene, SceneId } from './types';
 import { EN_PRESETS, JP_PRESETS, MONO_PRESETS } from './fonts';
 
 export interface TrackInfo {
@@ -8,6 +8,18 @@ export interface TrackInfo {
   label: string;
   note?: string;
 }
+
+/** off / on (full) / auto (follows Jev's intensity) / beat (pulses on the beat) */
+export type EffectMode = 'off' | 'on' | 'auto' | 'beat';
+
+export const GROUP_LABELS: Record<string, string> = {
+  hina: 'ひな祭り',
+  '2d': '2D',
+  gl: 'GLSL / 3D',
+  isf: 'ISF',
+  shadertoy: 'Shadertoy',
+  user: '追加',
+};
 
 export interface UiCallbacks {
   playDemo(): void;
@@ -23,7 +35,12 @@ export interface UiCallbacks {
   /** scene picker */
   selectScene(id: SceneId): void;
   setSceneEnabled(id: SceneId, on: boolean): void;
-  setScenePreset(kind: 'all' | 'hina' | '2d' | 'gl'): void;
+  /** 'all' or a scene group */
+  setScenePreset(kind: string): void;
+  /** shader / plugin files picked or dropped */
+  loadPlugins(files: File[]): void;
+  removePlugin(id: string): void;
+  setEffectMode(id: string, mode: EffectMode): void;
   /** which: 'jp' | 'en' | 'log'; family '' resets to the system font */
   setFont(which: 'jp' | 'en' | 'log', family: string): Promise<string>;
   getFonts(): { jp: string; en: string; log: string };
@@ -78,6 +95,8 @@ export class Ui {
   private readonly nowPlayingEl: HTMLElement;
   private readonly unitsEl: HTMLElement;
   private readonly sceneGrid: HTMLElement;
+  private readonly presetRow: HTMLElement;
+  private readonly fxList: HTMLElement;
   private sceneButtons = new Map<SceneId, { btn: HTMLButtonElement; cb: HTMLInputElement }>();
   private activeScene: SceneId | null = null;
   private readonly trackSelect: HTMLSelectElement;
@@ -228,20 +247,36 @@ export class Ui {
     // scene picker (素材)
     const scSec = el('section');
     scSec.append(el('h2', '', 'Scenes (素材)'));
-    const presetRow = el('div', 'row');
-    for (const [kind, label] of [
-      ['all', 'すべて'],
-      ['hina', 'ひな祭り'],
-      ['2d', '2D'],
-      ['gl', 'GLSL / 3D'],
-    ] as const) {
-      const b = el('button', '', label);
-      b.onclick = () => cb.setScenePreset(kind);
-      presetRow.append(b);
-    }
+    this.presetRow = el('div', 'row');
     this.sceneGrid = el('div', 'scenes');
-    scSec.append(presetRow, this.sceneGrid, el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。数字キー 1〜9, 0 でも切替'));
+    const plugInput = el('input');
+    plugInput.type = 'file';
+    plugInput.multiple = true;
+    plugInput.accept = '.fs,.frag,.glsl,.isf,.txt,.js,.mjs';
+    plugInput.style.display = 'none';
+    plugInput.onchange = () => {
+      if (plugInput.files?.length) cb.loadPlugins([...plugInput.files]);
+      plugInput.value = '';
+    };
+    const plugBtn = el('button', '', 'シェーダー / プラグインを追加…');
+    plugBtn.onclick = () => plugInput.click();
+    const plugRow = el('div', 'row');
+    plugRow.append(plugBtn, plugInput);
+    scSec.append(
+      this.presetRow,
+      this.sceneGrid,
+      el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。数字キー 1〜9, 0 でも切替'),
+      plugRow,
+      el('div', 'hint', 'ISF (.fs) / Shadertoy (mainImage) / GLSL / JS モジュールを画面にドロップしても追加できる。ISF のフィルタは FX に入る。追加分はブラウザに保存され、× で削除'),
+    );
     this.panel.append(scSec);
+
+    // stage effects (ISF filters, canvas post effects)
+    const fxSec = el('section');
+    fxSec.append(el('h2', '', 'FX (ポストエフェクト)'));
+    this.fxList = el('div', 'fxlist');
+    fxSec.append(this.fxList, el('div', 'hint', 'auto = Jev の激しさに連動 / beat = ビートで脈打つ / on = 常時'));
+    this.panel.append(fxSec);
 
     // logo
     const logoSec = el('section');
@@ -416,22 +451,57 @@ export class Ui {
   private durationSec = 0;
 
   setScenes(scenes: Scene[]): void {
+    this.presetRow.replaceChildren();
+    const groups = [...new Set(scenes.map((sc) => sc.group))];
+    for (const kind of ['all', ...groups]) {
+      const b = el('button', '', kind === 'all' ? 'すべて' : (GROUP_LABELS[kind] ?? kind));
+      b.onclick = () => this.cb.setScenePreset(kind);
+      this.presetRow.append(b);
+    }
     this.sceneGrid.replaceChildren();
     this.sceneButtons.clear();
     scenes.forEach((sc, i) => {
-      const item = el('div', `scene-item g-${sc.group}`);
+      const item = el('div', `scene-item g-${sc.group}${sc.error ? ' broken' : ''}`);
       const cbx = el('input');
       cbx.type = 'checkbox';
       cbx.checked = true;
       cbx.onchange = () => this.cb.setSceneEnabled(sc.id, cbx.checked);
       const btn = el('button', '', sc.name);
-      btn.title = sc.description;
+      btn.title = sc.error ? `エラー: ${sc.error}` : `${sc.description}${sc.source ? `\n${sc.source}` : ''}`;
       btn.onclick = () => this.cb.selectScene(sc.id);
       const key = i < 9 ? String(i + 1) : i === 9 ? '0' : '';
-      item.append(cbx, btn, el('span', 'hint key', key));
+      item.append(cbx, btn);
+      if (sc.group === 'user') {
+        const rm = el('button', 'rm', '×');
+        rm.title = '削除';
+        rm.onclick = () => this.cb.removePlugin(sc.id);
+        item.append(rm);
+      }
+      item.append(el('span', 'hint key', key));
       this.sceneGrid.append(item);
       this.sceneButtons.set(sc.id, { btn, cb: cbx });
     });
+  }
+
+  setEffects(effects: Effect[], modes: Map<string, EffectMode>): void {
+    this.fxList.replaceChildren();
+    if (effects.length === 0) this.fxList.append(el('div', 'hint', '（なし）'));
+    for (const fx of effects) {
+      const row = el('div', `fx-item${fx.error ? ' broken' : ''}`);
+      const name = el('span', 'fxname', fx.name);
+      name.title = fx.error ? `エラー: ${fx.error}` : fx.description;
+      const sel = el('select');
+      for (const m of ['off', 'auto', 'beat', 'on'] as const) sel.append(new Option(m, m));
+      sel.value = modes.get(fx.id) ?? 'off';
+      sel.onchange = () => this.cb.setEffectMode(fx.id, sel.value as EffectMode);
+      row.append(name, sel);
+      if (fx.id.startsWith('user_')) {
+        const rm = el('button', 'rm', '×');
+        rm.onclick = () => this.cb.removePlugin(fx.id);
+        row.append(rm);
+      }
+      this.fxList.append(row);
+    }
   }
 
   setEnabledScenes(ids: Set<SceneId>): void {
@@ -508,7 +578,7 @@ export class Ui {
         pc.textContent = JSON.stringify(
           {
             phase: `${c.phase.choice} (${c.phase.probabilities[c.phase.choice].toFixed(2)})`,
-            scene: `${c.scene.choice} (${c.scene.probabilities[c.scene.choice].toFixed(2)})`,
+            scene: `${c.scene.choice} (${(c.scene.probabilities[c.scene.choice] ?? 0).toFixed(2)})`,
             switch_now: c.switch_now.noul.toFixed(2),
             drop_soon: c.drop_soon.noul.toFixed(2),
             drop_scene: c.drop_scene?.choice ?? '(未質問)',
