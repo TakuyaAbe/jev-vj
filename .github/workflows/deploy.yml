@@ -33,7 +33,7 @@ jobs:
 
       - run: npm run build
 
-      - name: Deploy (skipped until CLOUDFLARE_API_TOKEN is set)
+      - name: Deploy to Cloudflare
         if: env.HAS_TOKEN == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
