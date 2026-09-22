@@ -1,0 +1,6 @@
+node_modules/
+out/
+.capture-frames/
+.probe/
+.venv/
+public/script.json

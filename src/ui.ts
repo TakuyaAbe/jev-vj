@@ -1,0 +1,650 @@
+import type { DecisionReason, Deliberation, DirectorState, LogEntry } from './director';
+import type { JevResult } from './jev';
+import type { BeatInfo, FrameFeatures, Scene, SceneId } from './types';
+import { EN_PRESETS, JP_PRESETS, MONO_PRESETS } from './fonts';
+
+export interface TrackInfo {
+  file: string;
+  label: string;
+  note?: string;
+}
+
+export interface UiCallbacks {
+  playDemo(): void;
+  playFile(file: File): void;
+  startMic(deviceId: string | undefined): void;
+  startSystemAudio(): void;
+  stop(): void;
+  setMagi(on: boolean): void;
+  setOverlay(on: boolean): void;
+  logoNow(): void;
+  setLogoText(main: string, sub: string, subAbove: boolean): void;
+  getLogoText(): { main: string; sub: string; subAbove: boolean };
+  /** scene picker */
+  selectScene(id: SceneId): void;
+  setSceneEnabled(id: SceneId, on: boolean): void;
+  setScenePreset(kind: 'all' | 'hina' | '2d' | 'gl'): void;
+  /** which: 'jp' | 'en' | 'log'; family '' resets to the system font */
+  setFont(which: 'jp' | 'en' | 'log', family: string): Promise<string>;
+  getFonts(): { jp: string; en: string; log: string };
+  /** random font switching for the logo lines */
+  setFontShuffle(opts: { enabled: boolean; intervalSec: number; beatSync: boolean }, onStatus: (text: string) => void): void;
+  toggleMute(): boolean;
+  playTrack(index: number): void;
+  seek(sec: number): void;
+  setAutoAdvance(on: boolean): void;
+  setInterval(bars: number): void;
+  setContext(text: string): void;
+  askNow(): void;
+  togglePause(): boolean;
+}
+
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+function meter(label: string): { root: HTMLElement; set(v: number, text?: string): void } {
+  const root = el('div', 'meter');
+  const name = el('span', '', label);
+  const track = el('div', 'track');
+  const fill = el('div', 'fill');
+  const val = el('span', 'val');
+  track.append(fill);
+  root.append(name, track, val);
+  return {
+    root,
+    set(v, text) {
+      fill.style.width = `${Math.max(0, Math.min(100, v * 100)).toFixed(0)}%`;
+      val.textContent = text ?? v.toFixed(2);
+    },
+  };
+}
+
+export class Ui {
+  private readonly panel: HTMLElement;
+  private readonly meters: Record<string, ReturnType<typeof meter>> = {};
+  private readonly beatEl: HTMLElement;
+  private readonly answersEl: HTMLElement;
+  private readonly statsEl: HTMLElement;
+  private readonly logEl: HTMLElement;
+  private readonly statusEl: HTMLElement;
+  private readonly pauseBtn: HTMLButtonElement;
+  private readonly sourceBtns: HTMLButtonElement[] = [];
+  private readonly sourceRow: HTMLElement;
+  private readonly deviceSelect: HTMLSelectElement;
+  private readonly nowPlayingEl: HTMLElement;
+  private readonly unitsEl: HTMLElement;
+  private readonly sceneGrid: HTMLElement;
+  private sceneButtons = new Map<SceneId, { btn: HTMLButtonElement; cb: HTMLInputElement }>();
+  private activeScene: SceneId | null = null;
+  private readonly trackSelect: HTMLSelectElement;
+  private readonly trackNote: HTMLElement;
+  private readonly progress: HTMLInputElement;
+  private readonly timeEl: HTMLElement;
+  private seeking = false;
+  private tracks: TrackInfo[] = [];
+
+  constructor(private readonly cb: UiCallbacks) {
+    this.panel = document.getElementById('panel')!;
+
+    const title = el('h1', '', 'JEV VJ');
+    const sub = el('div', 'hint', 'DSP がビートを刻み、Jev が小節ごとに演出を判断する。h: パネル / f: 全画面');
+    this.panel.append(title, sub);
+
+    // source
+    const src = el('section');
+    src.append(el('h2', '', 'Source'));
+    const row = el('div', 'row');
+    const demoBtn = el('button', '', 'Demo track');
+    demoBtn.onclick = () => cb.playDemo();
+    const fileInput = el('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'audio/*';
+    fileInput.style.display = 'none';
+    fileInput.onchange = () => {
+      const f = fileInput.files?.[0];
+      if (f) cb.playFile(f);
+      fileInput.value = '';
+    };
+    const fileBtn = el('button', '', 'Audio file…');
+    fileBtn.onclick = () => fileInput.click();
+    const micBtn = el('button', '', 'Mic / line-in');
+    micBtn.onclick = () => cb.startMic(this.deviceSelect.value || undefined);
+    const sysBtn = el('button', '', 'System audio');
+    sysBtn.title = '画面共有ダイアログで「システム音声を共有」を選ぶと、Spotify など Mac で鳴っている音をそのまま解析する';
+    sysBtn.onclick = () => cb.startSystemAudio();
+    const stopBtn = el('button', '', 'Stop');
+    stopBtn.onclick = () => cb.stop();
+    const muteBtn = el('button', '', 'Mute');
+    muteBtn.onclick = () => muteBtn.classList.toggle('on', cb.toggleMute());
+    this.sourceBtns.push(demoBtn, fileBtn, micBtn, sysBtn);
+    row.append(demoBtn, fileBtn, micBtn, sysBtn, stopBtn, muteBtn, fileInput);
+    this.sourceRow = row;
+    const devRow = el('div', 'row');
+    devRow.append(el('span', 'hint', 'input'));
+    this.deviceSelect = el('select');
+    this.deviceSelect.style.maxWidth = '240px';
+    const none = el('option', '', 'default');
+    none.value = '';
+    this.deviceSelect.append(none);
+    devRow.append(this.deviceSelect);
+    this.statusEl = el('div', 'hint', 'stopped');
+    this.nowPlayingEl = el('div', 'hint', '');
+    src.append(row, devRow, this.statusEl, this.nowPlayingEl);
+    this.panel.append(src);
+
+    // playlist
+    const pl = el('section');
+    pl.append(el('h2', '', 'Tracks (CC, public/tracks)'));
+    const plRow = el('div', 'row');
+    this.trackSelect = el('select');
+    this.trackSelect.style.maxWidth = '200px';
+    this.trackSelect.onchange = () => this.showTrackNote();
+    const playBtn = el('button', '', '▶ Play');
+    playBtn.onclick = () => cb.playTrack(Number(this.trackSelect.value));
+    const prevBtn = el('button', '', '⏮');
+    prevBtn.onclick = () => this.step(-1);
+    const nextBtn = el('button', '', '⏭');
+    nextBtn.onclick = () => this.step(1);
+    plRow.append(this.trackSelect, playBtn, prevBtn, nextBtn);
+    this.trackNote = el('div', 'hint', '');
+    const seekRow = el('div', 'row');
+    this.progress = el('input');
+    this.progress.type = 'range';
+    this.progress.min = '0';
+    this.progress.max = '1000';
+    this.progress.value = '0';
+    this.progress.style.flex = '1';
+    this.progress.oninput = () => {
+      this.seeking = true;
+    };
+    this.progress.onchange = () => {
+      this.seeking = false;
+      cb.seek((Number(this.progress.value) / 1000) * this.durationSec);
+    };
+    this.timeEl = el('span', 'hint', '0:00 / 0:00');
+    seekRow.append(this.progress, this.timeEl);
+    const autoRow = el('label', 'row hint');
+    const auto = el('input');
+    auto.type = 'checkbox';
+    auto.checked = true;
+    auto.onchange = () => cb.setAutoAdvance(auto.checked);
+    autoRow.append(auto, document.createTextNode('曲が終わったら次へ'));
+    pl.append(plRow, this.trackNote, seekRow, autoRow);
+    this.panel.append(pl);
+
+    // context + interval
+    const ctxSec = el('section');
+    ctxSec.append(el('h2', '', 'Context for Jev'));
+    const ta = el('textarea');
+    ta.placeholder = 'ジャンル・雰囲気・今夜の狙いなど（例: メロディックテクノ、深夜のピークタイム、赤系は避けたい）';
+    ta.oninput = () => cb.setContext(ta.value);
+    const row2 = el('div', 'row');
+    row2.append(el('span', 'hint', 'ask every'));
+    const sel = el('select');
+    for (const n of [1, 2, 4, 8]) {
+      const o = el('option', '', `${n} bar${n > 1 ? 's' : ''}`);
+      o.value = String(n);
+      if (n === 2) o.selected = true;
+      sel.append(o);
+    }
+    sel.onchange = () => cb.setInterval(Number(sel.value));
+    const askBtn = el('button', '', 'Ask now');
+    askBtn.onclick = () => cb.askNow();
+    this.pauseBtn = el('button', '', 'Pause Jev');
+    this.pauseBtn.onclick = () => {
+      const paused = cb.togglePause();
+      this.pauseBtn.textContent = paused ? 'Resume Jev' : 'Pause Jev';
+      this.pauseBtn.classList.toggle('on', paused);
+    };
+    row2.append(sel, askBtn, this.pauseBtn);
+    const row3 = el('div', 'row');
+    const magiLabel = el('label', 'row hint');
+    const magiCb = el('input');
+    magiCb.type = 'checkbox';
+    magiCb.checked = true;
+    magiCb.onchange = () => cb.setMagi(magiCb.checked);
+    magiLabel.append(magiCb, document.createTextNode('MAGI（3 体で合議）'));
+    const ovLabel = el('label', 'row hint');
+    const ovCb = el('input');
+    ovCb.type = 'checkbox';
+    ovCb.checked = true;
+    ovCb.onchange = () => cb.setOverlay(ovCb.checked);
+    ovLabel.append(ovCb, document.createTextNode('CLI ログ表示 (m)'));
+    row3.append(magiLabel, ovLabel);
+    ctxSec.append(ta, row2, row3);
+    this.panel.append(ctxSec);
+
+    // scene picker (素材)
+    const scSec = el('section');
+    scSec.append(el('h2', '', 'Scenes (素材)'));
+    const presetRow = el('div', 'row');
+    for (const [kind, label] of [
+      ['all', 'すべて'],
+      ['hina', 'ひな祭り'],
+      ['2d', '2D'],
+      ['gl', 'GLSL / 3D'],
+    ] as const) {
+      const b = el('button', '', label);
+      b.onclick = () => cb.setScenePreset(kind);
+      presetRow.append(b);
+    }
+    this.sceneGrid = el('div', 'scenes');
+    scSec.append(presetRow, this.sceneGrid, el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。数字キー 1〜9, 0 でも切替'));
+    this.panel.append(scSec);
+
+    // logo
+    const logoSec = el('section');
+    logoSec.append(el('h2', '', 'Logo (決め場)'));
+    const saved = cb.getLogoText();
+    const jp = el('input');
+    jp.value = saved.main;
+    jp.placeholder = 'メイン（大きく出る行）';
+    const en = el('input');
+    en.value = saved.sub;
+    en.placeholder = 'サブ（小さく字間を空けて出る行）';
+    const posSel = el('select');
+    for (const [v, t] of [
+      ['above', 'サブを上に'],
+      ['below', 'サブを下に'],
+    ] as const) {
+      const o = el('option', '', t);
+      o.value = v;
+      posSel.append(o);
+    }
+    posSel.value = saved.subAbove ? 'above' : 'below';
+    const emit = (): void => cb.setLogoText(jp.value, en.value, posSel.value === 'above');
+    for (const i of [jp, en]) {
+      i.type = 'text';
+      i.style.width = '100%';
+      i.style.font = 'inherit';
+      i.style.background = '#101018';
+      i.style.color = 'var(--fg)';
+      i.style.border = '1px solid var(--line)';
+      i.style.borderRadius = '4px';
+      i.style.padding = '4px 6px';
+      i.oninput = emit;
+    }
+    posSel.onchange = emit;
+    const logoRow = el('div', 'row');
+    const logoBtn = el('button', '', 'Logo now (l)');
+    logoBtn.onclick = () => cb.logoNow();
+    logoRow.append(logoBtn, posSel);
+    logoSec.append(el('div', 'hint', 'メイン'), jp, el('div', 'hint', 'サブ'), en, logoRow, el('div', 'hint', 'Jev が決め場と判断すると 8 小節表示。次は 16 小節あけて'));
+    this.panel.append(logoSec);
+
+    // fonts (Google Fonts, loaded at runtime)
+    const fontSec = el('section');
+    fontSec.append(el('h2', '', 'Fonts (Google Fonts)'));
+    const current = cb.getFonts();
+    const fontRow = (label: string, which: 'jp' | 'en' | 'log', presets: string[], value: string): HTMLElement => {
+      const row = el('div', 'row');
+      row.append(el('span', 'hint', label));
+      const sel = el('select');
+      sel.style.maxWidth = '170px';
+      const addOption = (fam: string, text = fam): HTMLOptionElement => {
+        const o = el('option', '', text);
+        o.value = fam;
+        sel.append(o);
+        return o;
+      };
+      addOption('', 'system');
+      for (const f of presets) addOption(f);
+      if (value && !presets.includes(value)) addOption(value);
+      sel.value = value;
+      const status = el('span', 'hint', value ? '…' : 'system');
+      const apply = async (fam: string): Promise<void> => {
+        status.textContent = fam ? 'loading…' : 'system';
+        status.textContent = await cb.setFont(which, fam);
+      };
+      sel.onchange = () => void apply(sel.value);
+      // free text for any family that is not in the list
+      const custom = el('input');
+      custom.type = 'text';
+      custom.placeholder = 'その他の family 名 + Enter';
+      custom.style.width = '150px';
+      custom.style.font = 'inherit';
+      custom.style.background = '#101018';
+      custom.style.color = 'var(--fg)';
+      custom.style.border = '1px solid var(--line)';
+      custom.style.borderRadius = '4px';
+      custom.style.padding = '3px 6px';
+      custom.onkeydown = (e) => {
+        if (e.key !== 'Enter') return;
+        const fam = custom.value.trim();
+        if (!fam) return;
+        if (![...sel.options].some((o) => o.value === fam)) addOption(fam);
+        sel.value = fam;
+        custom.value = '';
+        void apply(fam);
+      };
+      if (value) void apply(value);
+      row.append(sel, status, custom);
+      return row;
+    };
+    fontSec.append(
+      fontRow('ロゴ メイン', 'jp', JP_PRESETS, current.jp),
+      fontRow('ロゴ サブ', 'en', EN_PRESETS, current.en),
+      fontRow('CLI ログ', 'log', MONO_PRESETS, current.log),
+    );
+    // random shuffle
+    const shRow = el('div', 'row');
+    const shLabel = el('label', 'row hint');
+    const shCb = el('input');
+    shCb.type = 'checkbox';
+    shLabel.append(shCb, document.createTextNode('ロゴのフォントをランダム切替'));
+    const shInterval = el('input');
+    shInterval.type = 'number';
+    shInterval.min = '0.05';
+    shInterval.max = '10';
+    shInterval.step = '0.05';
+    shInterval.value = '0.4';
+    shInterval.style.width = '64px';
+    shInterval.style.font = 'inherit';
+    shInterval.style.background = '#101018';
+    shInterval.style.color = 'var(--fg)';
+    shInterval.style.border = '1px solid var(--line)';
+    shInterval.style.borderRadius = '4px';
+    shInterval.style.padding = '3px 6px';
+    const beatLabel = el('label', 'row hint');
+    const beatCb = el('input');
+    beatCb.type = 'checkbox';
+    beatLabel.append(beatCb, document.createTextNode('ビート同期'));
+    const shStatus = el('span', 'hint', '');
+    const emitShuffle = (): void =>
+      cb.setFontShuffle({ enabled: shCb.checked, intervalSec: Math.max(0.05, Number(shInterval.value) || 0.4), beatSync: beatCb.checked }, (t) => {
+        shStatus.textContent = t;
+      });
+    shCb.onchange = emitShuffle;
+    shInterval.onchange = emitShuffle;
+    beatCb.onchange = emitShuffle;
+    shRow.append(shLabel, shInterval, el('span', 'hint', 'sec'), beatLabel, shStatus);
+    fontSec.append(shRow, el('div', 'hint', 'プルダウンは全候補が常に出る。Google Fonts にある family ならテキスト欄から追加できる'));
+    this.panel.append(fontSec);
+
+    // live analysis
+    const live = el('section');
+    live.append(el('h2', '', 'DSP (per frame)'));
+    this.beatEl = el('div', 'kv');
+    live.append(this.beatEl);
+    for (const k of ['energy', 'sub', 'bass', 'lowmid', 'mid', 'high']) {
+      const m = meter(k);
+      this.meters[k] = m;
+      live.append(m.root);
+    }
+    this.panel.append(live);
+
+    // jev answers
+    const jev = el('section');
+    jev.append(el('h2', '', 'MAGI / Jev (per bars)'));
+    this.statsEl = el('div', 'kv');
+    this.unitsEl = el('div');
+    this.answersEl = el('div');
+    jev.append(this.statsEl, this.unitsEl, this.answersEl);
+    this.panel.append(jev);
+
+    // log
+    const logSec = el('section');
+    logSec.append(el('h2', '', 'Decisions'));
+    this.logEl = el('div');
+    this.logEl.id = 'log';
+    logSec.append(this.logEl);
+    this.panel.append(logSec);
+
+    window.addEventListener('keydown', (e) => {
+      const t = e.target;
+      if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
+      if (t instanceof HTMLInputElement && ['text', 'number', 'search', 'url'].includes(t.type)) return;
+      if (e.key === 'h') this.panel.classList.toggle('hidden');
+      if (e.key === 'f') {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void document.documentElement.requestFullscreen();
+      }
+    });
+  }
+
+  private durationSec = 0;
+
+  setScenes(scenes: Scene[]): void {
+    this.sceneGrid.replaceChildren();
+    this.sceneButtons.clear();
+    scenes.forEach((sc, i) => {
+      const item = el('div', `scene-item g-${sc.group}`);
+      const cbx = el('input');
+      cbx.type = 'checkbox';
+      cbx.checked = true;
+      cbx.onchange = () => this.cb.setSceneEnabled(sc.id, cbx.checked);
+      const btn = el('button', '', sc.name);
+      btn.title = sc.description;
+      btn.onclick = () => this.cb.selectScene(sc.id);
+      const key = i < 9 ? String(i + 1) : i === 9 ? '0' : '';
+      item.append(cbx, btn, el('span', 'hint key', key));
+      this.sceneGrid.append(item);
+      this.sceneButtons.set(sc.id, { btn, cb: cbx });
+    });
+  }
+
+  setEnabledScenes(ids: Set<SceneId>): void {
+    for (const [id, { cb }] of this.sceneButtons) cb.checked = ids.size === 0 || ids.has(id);
+  }
+
+  setActiveScene(id: SceneId): void {
+    if (this.activeScene === id) return;
+    if (this.activeScene) this.sceneButtons.get(this.activeScene)?.btn.classList.remove('on');
+    this.sceneButtons.get(id)?.btn.classList.add('on');
+    this.activeScene = id;
+  }
+
+  setInputDevices(devices: { deviceId: string; label: string }[]): void {
+    const cur = this.deviceSelect.value;
+    const none = el('option', '', 'default');
+    none.value = '';
+    this.deviceSelect.replaceChildren(
+      none,
+      ...devices.map((d) => {
+        const o = el('option', '', d.label);
+        o.value = d.deviceId;
+        return o;
+      }),
+    );
+    if ([...this.deviceSelect.options].some((o) => o.value === cur)) this.deviceSelect.value = cur;
+  }
+
+  setNowPlaying(text: string | null): void {
+    this.nowPlayingEl.textContent = text ?? '';
+  }
+
+  /** Three-column verdict table for the latest deliberation. */
+  showDeliberation(d: Deliberation): void {
+    const rows: HTMLElement[] = [];
+    const head = el('div', 'units');
+    for (const u of d.units) {
+      const cell = el('div', `unit ${u.stance}`);
+      cell.append(el('div', 'uname', `${u.unit.name}·${u.unit.number}`));
+      if (u.error) cell.append(el('div', 'uerr', u.error.slice(0, 40)));
+      else if (!u.result) cell.append(el('div', 'hint', '審議中'));
+      else {
+        const a = u.result.answers;
+        const prop = u.proposal === 'keep' || u.proposal === null ? '維持' : u.proposal;
+        cell.append(el('div', 'uprop', prop));
+        cell.append(el('div', 'hint', `${a.phase.choice} · sw ${a.switch_now.noul.toFixed(2)} · int ${a.intensity.score.toFixed(1)} · ${a.palette.choice} · ${Math.round(u.result.latencyMs)}ms`));
+        if (u.stance !== 'none') cell.append(el('div', 'ustance', u.stance === 'for' ? '賛成' : '反対'));
+      }
+      head.append(cell);
+    }
+    rows.push(head);
+    const outcome = d.outcome === 'approved' ? '可決' : d.outcome === 'rejected' ? '否決' : d.outcome === 'keep' ? '維持' : d.outcome === 'error' ? 'エラー' : '審議中';
+    rows.push(el('div', `uresult ${d.outcome}`, `#${d.id} ${outcome}  ${d.note}`));
+    // what went in, what came out
+    if (d.input) {
+      const det = el('details');
+      det.append(el('summary', 'hint', `#${d.id} 入力 (state) → 出力 (answers) を見る`));
+      const pre = el('pre', 'json');
+      pre.textContent = JSON.stringify(d.input, null, 1);
+      det.append(el('div', 'hint', '入力 state（3 体共通。各 unit には judge.stance が加わる）'), pre);
+      for (const u of d.units) {
+        if (!u.result) continue;
+        const a = u.result.answers;
+        const brief = Object.fromEntries(
+          Object.entries(a).map(([k, v]) => [k, 'choice' in v ? `${v.choice} (${(v.probabilities as Record<string, number>)[v.choice]?.toFixed(2)})` : 'noul' in v ? v.noul.toFixed(2) : v.score.toFixed(2)]),
+        );
+        const pu = el('pre', 'json');
+        pu.textContent = JSON.stringify(brief, null, 1);
+        det.append(el('div', 'hint', `${u.unit.name}-${u.unit.number} の回答  ${Math.round(u.result.latencyMs)}ms  ${u.result.usage.input_tokens} tokens`), pu);
+      }
+      if (d.consensus) {
+        const c = d.consensus;
+        const pc = el('pre', 'json');
+        pc.textContent = JSON.stringify(
+          {
+            phase: `${c.phase.choice} (${c.phase.probabilities[c.phase.choice].toFixed(2)})`,
+            scene: `${c.scene.choice} (${c.scene.probabilities[c.scene.choice].toFixed(2)})`,
+            switch_now: c.switch_now.noul.toFixed(2),
+            drop_soon: c.drop_soon.noul.toFixed(2),
+            drop_scene: c.drop_scene.choice,
+            intensity: c.intensity.score.toFixed(2),
+            palette: c.palette.choice,
+            transition: c.transition.choice,
+            kime: c.kime.noul.toFixed(2),
+            kime_on_drop: c.kime_on_drop.noul.toFixed(2),
+          },
+          null,
+          1,
+        );
+        det.append(el('div', 'hint', '合議（多数決 / 平均）'), pc);
+      }
+      rows.push(det);
+    }
+    this.unitsEl.replaceChildren(...rows);
+  }
+
+  setTracks(tracks: TrackInfo[]): void {
+    this.tracks = tracks;
+    this.trackSelect.replaceChildren(
+      ...tracks.map((t, i) => {
+        const o = el('option', '', t.label);
+        o.value = String(i);
+        return o;
+      }),
+    );
+    this.showTrackNote();
+  }
+
+  selectTrack(index: number): void {
+    this.trackSelect.value = String(index);
+    this.showTrackNote();
+  }
+
+  private showTrackNote(): void {
+    const t = this.tracks[Number(this.trackSelect.value)];
+    this.trackNote.textContent = t?.note ?? '';
+  }
+
+  private step(delta: number): void {
+    if (this.tracks.length === 0) return;
+    const i = (Number(this.trackSelect.value) + delta + this.tracks.length) % this.tracks.length;
+    this.selectTrack(i);
+    this.cb.playTrack(i);
+  }
+
+  setProgress(posSec: number, durationSec: number): void {
+    this.durationSec = durationSec;
+    if (!this.seeking) this.progress.value = durationSec > 0 ? String(Math.round((posSec / durationSec) * 1000)) : '0';
+    const f = (x: number): string => `${Math.floor(x / 60)}:${Math.floor(x % 60).toString().padStart(2, '0')}`;
+    this.timeEl.textContent = `${f(posSec)} / ${f(durationSec)}`;
+  }
+
+  addSourceButton(label: string, onClick: () => void): void {
+    const b = el('button', '', label);
+    b.onclick = onClick;
+    this.sourceRow.insertBefore(b, this.sourceRow.children[3] ?? null);
+  }
+
+  setStatus(text: string, active: 'demo' | 'file' | 'mic' | null): void {
+    this.statusEl.textContent = text;
+    const idx = active === 'demo' ? 0 : active === 'file' ? 1 : active === 'mic' ? 2 : -1;
+    this.sourceBtns.forEach((b, i) => b.classList.toggle('on', i === idx));
+  }
+
+  updateLive(f: FrameFeatures | null, beat: BeatInfo, d: DirectorState, sectionHint: string | null): void {
+    if (f) {
+      this.meters.energy!.set(f.rms);
+      this.meters.sub!.set(f.sub);
+      this.meters.bass!.set(f.bass);
+      this.meters.lowmid!.set(f.lowmid);
+      this.meters.mid!.set(f.mid);
+      this.meters.high!.set(f.high);
+    }
+    const dots = ['●', '○', '○', '○'].map((_, i) => (i === beat.beatInBar ? '●' : '○')).join('');
+    this.setActiveScene(d.scene.id);
+    this.beatEl.replaceChildren(
+      ...kv('bpm', beat.bpm ? `${beat.bpm.toFixed(1)} ${beat.locked ? '' : '(searching)'}` : '--'),
+      ...kv('bar', `${beat.bar}  ${dots}`),
+      ...kv('scene', `${d.scene.name}${d.transition ? ` → ${d.transition.to.name}` : ''}`),
+      ...kv('intensity', d.intensity.toFixed(2)),
+      ...kv('palette', d.paletteId),
+      ...kv('armed', d.armed ? `${d.armed.scene} (until bar ${d.armed.untilBar})` : '--'),
+    );
+    void sectionHint;
+  }
+
+  showDecision(r: JevResult, reason: DecisionReason, d: DirectorState): void {
+    const a = r.answers;
+    const avg = d.latencies.length ? d.latencies.reduce((x, y) => x + y, 0) / d.latencies.length : 0;
+    this.statsEl.replaceChildren(
+      ...kv('calls', `${d.calls} 審議 ${Math.round(d.calls / (d.magi ? 3 : 1))} · skip ${d.skips} · next +${d.nextIntervalBars} (${reason})`),
+      ...kv('latency', `${Math.round(r.latencyMs)} ms  avg ${Math.round(avg)} ms`),
+      ...kv('tokens', `${r.usage.input_tokens} in / ${r.usage.output_tokens} out`),
+      ...kv('cost', `$${d.costUsd.toFixed(4)} total  (~$${((d.costUsd / Math.max(1, d.calls)) * 900).toFixed(3)}/h at 1 call/4s)`),
+      ...kv('model', r.model),
+    );
+    const blocks: HTMLElement[] = [];
+    const probs = (name: string, p: Record<string, number>, win: string): void => {
+      blocks.push(el('div', 'qname', name));
+      for (const [k, v] of Object.entries(p).sort((x, y) => y[1] - x[1])) {
+        const row = el('div', `prob${k === win ? ' win' : ''}`);
+        const track = el('div', 'track');
+        const fill = el('div', 'fill');
+        fill.style.width = `${(v * 100).toFixed(0)}%`;
+        track.append(fill);
+        row.append(el('span', 'name', k), track, el('span', 'val', v.toFixed(2)));
+        blocks.push(row);
+      }
+    };
+    probs('phase', a.phase.probabilities, a.phase.choice);
+    blocks.push(el('div', 'qname', 'drop_soon / switch_now'));
+    for (const [k, v] of [
+      ['drop_soon', a.drop_soon.noul],
+      ['switch_now', a.switch_now.noul],
+    ] as const) {
+      const row = el('div', `prob${v >= 0.5 ? ' win' : ''}`);
+      const track = el('div', 'track');
+      const fill = el('div', 'fill');
+      fill.style.width = `${(v * 100).toFixed(0)}%`;
+      track.append(fill);
+      row.append(el('span', 'name', k), track, el('span', 'val', v.toFixed(2)));
+      blocks.push(row);
+    }
+    probs('scene', a.scene.probabilities, a.scene.choice);
+    probs('drop_scene (speculative)', a.drop_scene.probabilities, a.drop_scene.choice);
+    probs(`intensity = ${a.intensity.score.toFixed(2)}`, a.intensity.probabilities, String(Math.round(a.intensity.score)));
+    probs('palette', a.palette.probabilities, a.palette.choice);
+    probs('transition', a.transition.probabilities, a.transition.choice);
+    this.answersEl.replaceChildren(...blocks);
+  }
+
+  log(e: LogEntry): void {
+    const row = el('div', `entry ${e.kind}`);
+    const d = new Date();
+    row.append(el('span', 't', d.toLocaleTimeString('ja-JP', { hour12: false })), document.createTextNode(e.text));
+    this.logEl.prepend(row);
+    while (this.logEl.children.length > 80) this.logEl.lastChild?.remove();
+  }
+}
+
+function kv(k: string, v: string): HTMLElement[] {
+  return [el('span', '', k), el('b', '', v)];
+}

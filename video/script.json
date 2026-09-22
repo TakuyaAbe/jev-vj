@@ -1,0 +1,502 @@
+{
+  "meta": {
+    "title": "Jev VJ の使い方",
+    "subtitle": "BAKUROCHO DOMINO CLUB PRESENTS 🍲闇鍋🍲 用 VJ ツール",
+    "caption": "操作方法説明 · 2026-09-23",
+    "baseUrl": "http://127.0.0.1:5183",
+    "publicUrl": "https://jevj.sayuno.me",
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "capture": {
+      "width": 1920,
+      "height": 920,
+      "panelZoom": 1.5
+    },
+    "voice": "ja-JP-NanamiNeural",
+    "version": 1,
+    "publicNote": "ブラウザで開くだけ（PC 推奨 · Chrome）",
+    "rate": "+15%"
+  },
+  "cards": {
+    "title": {
+      "minSeconds": 7,
+      "narration": "ジェヴ ブイジェイの使い方です。バクロチョウ ドミノクラブ プレゼンツ、闇鍋のための VJ ツールです。"
+    },
+    "overview": {
+      "minSeconds": 14,
+      "narration": "DSP がビートと小節を刻み、映像は毎フレーム反応。数小節ごとに三体のジェヴ、科学者メルキオール、母バルタザール、女キャスパーが、次のシーンや決め場を合議で決めます。"
+    },
+    "keys": {
+      "minSeconds": 8,
+      "narration": "早見です。h でパネル、m でログ、l でロゴ、f で全画面、数字キーでシーン切替。",
+      "items": [
+        {
+          "key": "h",
+          "label": "サイドパネル 表示 / 非表示"
+        },
+        {
+          "key": "m",
+          "label": "CLI ログ 表示 / 非表示"
+        },
+        {
+          "key": "l",
+          "label": "決め場ロゴ 表示 / 非表示"
+        },
+        {
+          "key": "f",
+          "label": "全画面"
+        },
+        {
+          "key": "1〜9, 0",
+          "label": "シーン切替（一覧の番号順 · 8 小節ホールド）"
+        }
+      ]
+    },
+    "outro": {
+      "minSeconds": 8,
+      "narration": "公開版はこの URL。ブラウザで開くだけです。以上、ジェヴ ブイジェイの使い方でした。"
+    }
+  },
+  "chapters": [
+    {
+      "id": "source",
+      "number": 1,
+      "title": "起動と音源",
+      "steps": [
+        {
+          "id": "s_panel",
+          "subtitle": "右のサイドパネルが操作盤。h キーで表示 / 非表示（ライブ中は隠してステージだけを映す）",
+          "narration": "右がサイドパネル。h キーで表示と非表示を切り替え、ライブ中は隠してステージだけを映します。",
+          "minSeconds": 8,
+          "actions": [
+            {
+              "type": "key",
+              "key": "h",
+              "at": 3.2
+            },
+            {
+              "type": "key",
+              "key": "h",
+              "at": 6.2
+            }
+          ],
+          "notes": [
+            {
+              "at": 0.6,
+              "until": 3,
+              "target": "panel",
+              "label": "サイドパネル",
+              "side": "left"
+            }
+          ]
+        },
+        {
+          "id": "s_demo",
+          "subtitle": "Demo track: 128 BPM のテクノを内蔵合成して再生。数秒でビートにロック",
+          "narration": "まずは Demo track。128 BPM のテクノを内蔵で合成して再生し、数秒でビートにロックします。",
+          "minSeconds": 9,
+          "actions": [
+            {
+              "type": "click",
+              "target": "button:Demo track",
+              "at": 1
+            }
+          ],
+          "notes": [
+            {
+              "at": 4.2,
+              "until": 8.6,
+              "box": [
+                24,
+                786,
+                700,
+                26
+              ],
+              "label": "DSP がビートを刻み始める",
+              "side": "right"
+            }
+          ]
+        },
+        {
+          "id": "s_sources",
+          "subtitle": "Tracks: 用意した曲のプレイリスト（▶ Play / ⏮ ⏭ / シーク） · Audio file…: 手元のファイル · Mic / line-in: DJ ミキサーの出力",
+          "narration": "音源は三つ。Tracks はプレイリスト、Audio file は手元のファイル、Mic、line-in はミキサーの出力です。",
+          "minSeconds": 10,
+          "notes": [
+            {
+              "at": 0.8,
+              "until": 4.6,
+              "target": "section:Tracks",
+              "label": "プレイリスト",
+              "side": "left"
+            },
+            {
+              "at": 4.8,
+              "until": 7.2,
+              "target": "button:Audio file…",
+              "label": "手元のファイル",
+              "side": "left"
+            },
+            {
+              "at": 7.4,
+              "until": 10.2,
+              "target": "button:Mic / line-in",
+              "label": "ミキサー出力",
+              "side": "left"
+            }
+          ]
+        },
+        {
+          "id": "s_system",
+          "subtitle": "System audio: 画面共有ダイアログで「システム音声を共有」→ Spotify など Mac で鳴っている音をそのまま解析（モニター出力なし）",
+          "narration": "System audio は、画面共有でシステム音声を選ぶと、Spotify など Mac の音をそのまま解析します。",
+          "minSeconds": 9,
+          "notes": [
+            {
+              "at": 0.5,
+              "until": 8,
+              "target": "button:System audio",
+              "label": "Mac で鳴っている音",
+              "kind": "circle",
+              "side": "left"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reading",
+      "number": 2,
+      "title": "画面の読み方",
+      "steps": [
+        {
+          "id": "r_bars",
+          "subtitle": "小節行: bar 番号 · 4 拍の音圧 · BPM · 帯域レベル · オンセット数 · 傾向。今の小節はプロンプトのすぐ上で拍ごとに埋まる",
+          "narration": "ステージには CLI 風のログ。小節ごとに一行、四拍の音圧、BPM、帯域、傾向。今の小節はプロンプトのすぐ上で埋まります。",
+          "minSeconds": 11,
+          "actions": [
+            {
+              "type": "key",
+              "key": "h",
+              "at": 0.3
+            }
+          ],
+          "notes": [
+            {
+              "at": 1.2,
+              "until": 6.4,
+              "box": [
+                24,
+                540,
+                1320,
+                240
+              ],
+              "label": "小節ごとに 1 行",
+              "side": "above"
+            },
+            {
+              "at": 7,
+              "until": 11,
+              "box": [
+                24,
+                786,
+                700,
+                26
+              ],
+              "label": "今の小節（拍ごとに埋まる）",
+              "side": "right"
+            }
+          ],
+          "legend": {
+            "at": 1.5,
+            "until": 11.2,
+            "title": "小節行の読み方",
+            "items": [
+              {
+                "color": "#7fd8a8",
+                "sample": "bar 42  ●●●●  ▃▅▇▆",
+                "text": "小節番号 · 4 拍 · 拍ごとの音圧"
+              },
+              {
+                "color": "#7fd8a8",
+                "sample": "128.1bpm  e0.82 sub0.74 bf0.55 …",
+                "text": "BPM · 音圧 · 帯域レベル"
+              },
+              {
+                "color": "#7fd8a8",
+                "sample": "on12  trend +0.03",
+                "text": "オンセット数 · 傾向"
+              }
+            ]
+          }
+        },
+        {
+          "id": "r_magi",
+          "subtitle": "審議: 入力 :: の要約 → MELCHIOR-1 / BALTHASAR-2 / CASPER-3 の回答（提案 · switch · phase · int · drop · kime · ms）→ 合議 ::",
+          "narration": "数小節ごとに審議。入力の要約のあと、三体の回答が届いた順に並びます。提案シーン、切替の度合い、フェーズ、激しさ、決め場。最後が合議の行です。",
+          "minSeconds": 14,
+          "legend": {
+            "at": 0.8,
+            "until": 14,
+            "title": "審議ログ（数小節ごと）",
+            "items": [
+              {
+                "color": "#c8ffe0",
+                "sample": "MAGI #12 bar 24 :: 審議開始",
+                "text": "審議の開始（理由 · 候補数）"
+              },
+              {
+                "color": "#c8ffe0",
+                "sample": "入力 :: 音圧 0.66 層[…] 傾向 …",
+                "text": "Jev に渡した状態の要約"
+              },
+              {
+                "color": "#c8ffe0",
+                "sample": "MELCHIOR-1 / BALTHASAR-2 / CASPER-3",
+                "text": "3 体の回答: 提案 · switch · phase · int · drop · kime · ms"
+              },
+              {
+                "color": "#9fffc8",
+                "sample": "合議 :: …",
+                "text": "多数決 / 平均でまとめた結論"
+              }
+            ]
+          }
+        },
+        {
+          "id": "r_verdict",
+          "subtitle": "決議バッジ: 可決（緑）= 切替 / 否決（赤）= 提案あり・見送り / 維持（橙）= 提案なし / 決め場（黄）= ロゴ表示",
+          "narration": "決議は色のバッジ。緑の可決で切替、赤の否決は見送り、橙の維持は提案なし、黄色の決め場でロゴが出ます。",
+          "minSeconds": 10,
+          "legend": {
+            "at": 0.6,
+            "until": 9.8,
+            "title": "決議バッジ",
+            "items": [
+              {
+                "color": "#39ff88",
+                "badge": "可決",
+                "text": "切り替える"
+              },
+              {
+                "color": "#ff3a2e",
+                "badge": "否決",
+                "text": "提案はあったが見送り"
+              },
+              {
+                "color": "#ffb547",
+                "badge": "維持",
+                "text": "誰も提案せず"
+              },
+              {
+                "color": "#ffe94d",
+                "badge": "決め場",
+                "text": "ロゴを 8 小節表示"
+              }
+            ]
+          }
+        },
+        {
+          "id": "r_prompt",
+          "subtitle": "最下行 magi@bakurocho:~$ — 拍 · bar · BPM · 音圧 · 今のシーン · intensity · パレット · フェーズ · armed · 審議中",
+          "narration": "最下行のプロンプトは、拍、小節、BPM、音圧、今のシーンとフェーズ、審議中かどうかの一行まとめです。",
+          "minSeconds": 9,
+          "notes": [
+            {
+              "at": 0.8,
+              "until": 8.8,
+              "box": [
+                24,
+                810,
+                1180,
+                26
+              ],
+              "label": "プロンプト行",
+              "side": "above"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scenes",
+      "number": 3,
+      "title": "素材を選ぶ",
+      "steps": [
+        {
+          "id": "c_scenes",
+          "subtitle": "Scenes（素材）欄: チェック = Jev の候補に入れる / 外す。プリセット: すべて / ひな祭り / 2D / GLSL·3D",
+          "narration": "Scenes 欄が素材の一覧。チェックした素材だけがジェヴの候補です。プリセットでひな祭りや 2D、GLSL・3D を一括で選べます。",
+          "minSeconds": 10,
+          "actions": [
+            {
+              "type": "key",
+              "key": "h",
+              "at": 0.2
+            },
+            {
+              "type": "scrollTo",
+              "target": "section:Scenes",
+              "at": 0.7
+            },
+            {
+              "type": "click",
+              "target": "button:ひな祭り",
+              "at": 6.8
+            }
+          ],
+          "notes": [
+            {
+              "at": 1.8,
+              "until": 6,
+              "target": "section:Scenes",
+              "label": "素材の一覧",
+              "side": "left"
+            }
+          ]
+        },
+        {
+          "id": "c_cut",
+          "subtitle": "名前クリック = 今すぐ切替（8 小節ホールドで合議に上書きされない）。今出ている素材は緑",
+          "narration": "名前をクリックで今すぐ切替。八小節ホールドされ、合議に上書きされません。今の素材は緑です。",
+          "minSeconds": 9,
+          "actions": [
+            {
+              "type": "click",
+              "target": "scene:hina_dan3d",
+              "at": 0.8
+            },
+            {
+              "type": "click",
+              "target": "scene:hina_petals",
+              "at": 5.2
+            }
+          ]
+        },
+        {
+          "id": "c_keys",
+          "subtitle": "数字キー 1〜9, 0 でも切替（一覧の番号順）",
+          "narration": "数字キーの一から九とゼロでも、一覧の番号順に切り替えられます。",
+          "minSeconds": 6,
+          "actions": [
+            {
+              "type": "key",
+              "key": "7",
+              "at": 0.8
+            },
+            {
+              "type": "key",
+              "key": "2",
+              "at": 3.4
+            },
+            {
+              "type": "click",
+              "target": "button:すべて",
+              "at": 5.2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "logo",
+      "number": 4,
+      "title": "決め場のロゴ",
+      "steps": [
+        {
+          "id": "l_now",
+          "subtitle": "Logo（決め場）: l キー / Logo now で手動トグル。Jev が決め場と判断 or 先読みしたドロップの瞬間に自動で 8 小節表示",
+          "narration": "決め場のロゴ。L キーか Logo now で手動で出し入れ。ジェヴが決め場と判断すると自動で八小節出ます。",
+          "minSeconds": 10,
+          "actions": [
+            {
+              "type": "scrollTo",
+              "target": "section:Logo",
+              "at": 0.3
+            },
+            {
+              "type": "key",
+              "key": "l",
+              "at": 2.2
+            },
+            {
+              "type": "eval",
+              "js": "window.vj.director.state.logo.untilBar = 1e9",
+              "at": 2.6
+            }
+          ],
+          "notes": [
+            {
+              "at": 0.9,
+              "until": 4.6,
+              "target": "button:Logo now (l)",
+              "label": "手動トグル",
+              "side": "left"
+            }
+          ]
+        },
+        {
+          "id": "l_text",
+          "subtitle": "メイン / サブの文言はその場で変更。「サブを上に / 下に」で配置",
+          "narration": "メインとサブの文言はその場で書き換えられます。サブを上か下かも選べます。",
+          "minSeconds": 7,
+          "actions": [
+            {
+              "type": "type",
+              "target": "input:main",
+              "text": " NIGHT",
+              "at": 0.6
+            },
+            {
+              "type": "select",
+              "target": "select:pos",
+              "value": "サブを下に",
+              "at": 4.4
+            }
+          ]
+        },
+        {
+          "id": "l_fonts",
+          "subtitle": "Fonts: Google Fonts の family を選ぶ / 入力。「ランダム切替」で秒ごと or ビート同期でフォントが変わる",
+          "narration": "フォントは Google Fonts から選べます。ランダム切替を入れると、指定した秒ごと、またはビートごとにフォントが変わります。",
+          "minSeconds": 11,
+          "actions": [
+            {
+              "type": "scrollTo",
+              "target": "section:Fonts",
+              "at": 0.2
+            },
+            {
+              "type": "select",
+              "target": "select:ロゴ メイン",
+              "value": "Dela Gothic One",
+              "at": 0.8
+            },
+            {
+              "type": "select",
+              "target": "select:ロゴ サブ",
+              "value": "Bebas Neue",
+              "at": 3.2
+            },
+            {
+              "type": "check",
+              "target": "checkbox:ランダム切替",
+              "at": 5.8
+            },
+            {
+              "type": "check",
+              "target": "checkbox:ビート同期",
+              "at": 9
+            },
+            {
+              "type": "key",
+              "key": "l",
+              "at": -0.8
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "jev-vj-video",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "fonts": "node fonts.mjs",
+    "audio": "node audio.mjs",
+    "narration": "node narration.mjs",
+    "capture": "node capture.mjs",
+    "studio": "remotion studio remotion/index.ts",
+    "render": "remotion render remotion/index.ts Howto out/jev-vj-howto.mp4 --codec h264",
+    "still": "remotion still remotion/index.ts Howto out/still.png"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.523",
+    "@remotion/media": "^4.0.523",
+    "@remotion/transitions": "^4.0.523",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "playwright": "^1.63.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.523",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,46 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-jevj
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # the CC tracks are not in the repo; fetch them from archive.org (cached between runs)
+      - uses: actions/cache@v4
+        with:
+          path: public/tracks/*.mp3
+          key: tracks-${{ hashFiles('public/tracks/index.json') }}
+      - run: node scripts/fetch-tracks.mjs
+
+      - run: npm run build
+
+      - name: Deploy (skipped until CLOUDFLARE_API_TOKEN is set)
+        if: env.HAS_TOKEN == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Missing token notice
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::warning::CLOUDFLARE_API_TOKEN is not set; build succeeded but nothing was deployed."
