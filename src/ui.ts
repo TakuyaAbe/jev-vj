@@ -15,7 +15,7 @@ export interface UiCallbacks {
   startMic(deviceId: string | undefined): void;
   startSystemAudio(): void;
   stop(): void;
-  setMagi(on: boolean): void;
+  setMagiMode(mode: 'always' | 'changes' | 'single'): void;
   setOverlay(on: boolean): void;
   logoNow(): void;
   setLogoText(main: string, sub: string, subAbove: boolean): void;
@@ -203,11 +203,18 @@ export class Ui {
     row2.append(sel, askBtn, this.pauseBtn);
     const row3 = el('div', 'row');
     const magiLabel = el('label', 'row hint');
-    const magiCb = el('input');
-    magiCb.type = 'checkbox';
-    magiCb.checked = true;
-    magiCb.onchange = () => cb.setMagi(magiCb.checked);
-    magiLabel.append(magiCb, document.createTextNode('MAGI（3 体で合議）'));
+    const magiSel = el('select');
+    for (const [v, t] of [
+      ['always', 'MAGI 常時 3 体'],
+      ['changes', '変化時のみ 3 体（定期は 1 体）'],
+      ['single', '1 体だけ'],
+    ] as const) {
+      const o = el('option', '', t);
+      o.value = v;
+      magiSel.append(o);
+    }
+    magiSel.onchange = () => cb.setMagiMode(magiSel.value as 'always' | 'changes' | 'single');
+    magiLabel.append(magiSel);
     const ovLabel = el('label', 'row hint');
     const ovCb = el('input');
     ovCb.type = 'checkbox';
@@ -504,12 +511,12 @@ export class Ui {
             scene: `${c.scene.choice} (${c.scene.probabilities[c.scene.choice].toFixed(2)})`,
             switch_now: c.switch_now.noul.toFixed(2),
             drop_soon: c.drop_soon.noul.toFixed(2),
-            drop_scene: c.drop_scene.choice,
+            drop_scene: c.drop_scene?.choice ?? '(未質問)',
             intensity: c.intensity.score.toFixed(2),
             palette: c.palette.choice,
             transition: c.transition.choice,
             kime: c.kime.noul.toFixed(2),
-            kime_on_drop: c.kime_on_drop.noul.toFixed(2),
+            kime_on_drop: c.kime_on_drop ? c.kime_on_drop.noul.toFixed(2) : '(未質問)',
           },
           null,
           1,
@@ -595,9 +602,9 @@ export class Ui {
     const a = r.answers;
     const avg = d.latencies.length ? d.latencies.reduce((x, y) => x + y, 0) / d.latencies.length : 0;
     this.statsEl.replaceChildren(
-      ...kv('calls', `${d.calls} 審議 ${Math.round(d.calls / (d.magi ? 3 : 1))} · skip ${d.skips} · next +${d.nextIntervalBars} (${reason})`),
+      ...kv('calls', `${d.calls} 呼び出し · 審議 ${d.deliberation?.id ?? '-'} · skip ${d.skips} · next +${d.nextIntervalBars} (${reason})`),
       ...kv('latency', `${Math.round(r.latencyMs)} ms  avg ${Math.round(avg)} ms`),
-      ...kv('tokens', `${r.usage.input_tokens} in / ${r.usage.output_tokens} out`),
+      ...kv('tokens', `${r.usage.input_tokens} in この審議 · 累計 ${(d.inputTokens / 1000).toFixed(1)}k`),
       ...kv('cost', `$${d.costUsd.toFixed(4)} total  (~$${((d.costUsd / Math.max(1, d.calls)) * 900).toFixed(3)}/h at 1 call/4s)`),
       ...kv('model', r.model),
     );
@@ -629,7 +636,7 @@ export class Ui {
       blocks.push(row);
     }
     probs('scene', a.scene.probabilities, a.scene.choice);
-    probs('drop_scene (speculative)', a.drop_scene.probabilities, a.drop_scene.choice);
+    if (a.drop_scene) probs('drop_scene (speculative)', a.drop_scene.probabilities, a.drop_scene.choice);
     probs(`intensity = ${a.intensity.score.toFixed(2)}`, a.intensity.probabilities, String(Math.round(a.intensity.score)));
     probs('palette', a.palette.probabilities, a.palette.choice);
     probs('transition', a.transition.probabilities, a.transition.choice);

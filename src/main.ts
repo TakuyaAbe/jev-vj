@@ -196,8 +196,8 @@ const ui = new Ui({
       ui.setStatus(`system audio failed: ${e instanceof Error ? e.message : String(e)}`, null);
     }
   },
-  setMagi(on) {
-    director.state.magi = on;
+  setMagiMode(mode) {
+    director.state.magiMode = mode;
   },
   setOverlay(on) {
     terminal.enabled = on;

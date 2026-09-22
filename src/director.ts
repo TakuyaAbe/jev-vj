@@ -66,8 +66,10 @@ export interface DirectorState {
   lastPhase: PhaseId | null;
   intervalBars: number;
   paused: boolean;
-  /** MAGI mode: three units; otherwise a single anonymous Jev */
-  magi: boolean;
+  /** always: 3 units every time; changes: 3 units only on DSP-triggered / manual deliberations, 1 unit on the periodic ones; single: 1 unit */
+  magiMode: 'always' | 'changes' | 'single';
+  /** last consensus drop_soon; decides whether the speculative drop questions are asked next time */
+  lastDropSoon: number;
 }
 
 const USD_PER_INPUT_TOKEN = 0.042 / 1_000_000;
@@ -117,7 +119,7 @@ function consensusOf(results: JevResult[]): JevAnswers {
     drop_soon: { type: 'noul', noul: mean(A.map((a) => a.drop_soon.noul)) },
     switch_now: { type: 'noul', noul: mean(A.map((a) => a.switch_now.noul)) },
     scene: voteChoice(A.map((a) => a.scene)),
-    drop_scene: voteChoice(A.map((a) => a.drop_scene)),
+    drop_scene: A.every((a) => a.drop_scene) ? voteChoice(A.map((a) => a.drop_scene!)) : undefined,
     intensity: {
       type: 'score',
       score: mean(A.map((a) => a.intensity.score)),
@@ -127,7 +129,7 @@ function consensusOf(results: JevResult[]): JevAnswers {
     palette: voteChoice(A.map((a) => a.palette)),
     transition: voteChoice(A.map((a) => a.transition)),
     kime: { type: 'noul', noul: mean(A.map((a) => a.kime.noul)) },
-    kime_on_drop: { type: 'noul', noul: mean(A.map((a) => a.kime_on_drop.noul)) },
+    kime_on_drop: A.every((a) => a.kime_on_drop) ? { type: 'noul', noul: mean(A.map((a) => a.kime_on_drop!.noul)) } : undefined,
   };
 }
 
@@ -206,7 +208,8 @@ export class Director {
       lastPhase: null,
       intervalBars: 2,
       paused: false,
-      magi: true,
+      magiMode: 'always',
+      lastDropSoon: 0,
     };
   }
 
@@ -356,7 +359,10 @@ export class Director {
       lastSwitchReason: this.lastSwitchReason,
       userContext: this.userContext,
     };
-    const units: Unit[] = s.magi ? UNITS : [UNITS[0]!];
+    const triggered = reason !== 'interval';
+    const units: Unit[] = s.magiMode === 'always' || (s.magiMode === 'changes' && (triggered || s.armed !== null)) ? UNITS : [UNITS[0]!];
+    // the speculative drop questions cost ~1/3 of the tokens; skip them when the music is settled
+    const askDrop = triggered || s.armed !== null || s.lastDropSoon >= 0.3 || !(s.lastPhase === 'drop' || s.lastPhase === 'steady');
     const d: Deliberation = {
       id: ++this.deliberationSeq,
       reason,
@@ -376,15 +382,15 @@ export class Director {
     const cands0 = this.candidates();
     const input = buildState(this.agg, set, cands0);
     d.input = input;
-    this.log('magi', `MAGI #${d.id} bar ${bar} :: 審議開始 [${reason}] units=${units.length} 候補=${cands0.length}`);
+    this.log('magi', `MAGI #${d.id} bar ${bar} :: 審議開始 [${reason}] units=${units.length} 候補=${cands0.length}${askDrop ? '' : ' 先読み省略'}`);
     this.log('magi', `  入力 :: ${summarizeInput(input, set)}`);
 
     await Promise.all(
       d.units.map(async (uv) => {
-        const unit = s.magi ? uv.unit : undefined;
+        const unit = uv.unit;
         try {
           const cands = this.candidates();
-          const r = await callJev(buildState(this.agg, set, cands, unit), buildQuestions(cands, unit), signal);
+          const r = await callJev(buildState(this.agg, set, cands, unit), buildQuestions(cands, unit, { askDrop }), signal);
           uv.result = r;
           uv.arrivedAt = performance.now();
           uv.proposal = r.answers.switch_now.noul >= 0.5 && r.answers.scene.choice !== s.scene.id ? r.answers.scene.choice : 'keep';
@@ -444,6 +450,7 @@ export class Director {
     const s = this.state;
     const a = r.answers;
     s.lastPhase = a.phase.choice;
+    s.lastDropSoon = a.drop_soon.noul;
     this.targetIntensity = Math.max(0, Math.min(1, a.intensity.score / 4));
     if (a.palette.choice !== this.targetPalette && a.palette.confidence > 0.1) {
       this.targetPalette = a.palette.choice;
@@ -452,15 +459,16 @@ export class Director {
     }
     this.log(
       'jev',
-      `合議 :: ${a.phase.choice}(${a.phase.probabilities[a.phase.choice].toFixed(2)}) scene=${a.scene.choice}(${a.scene.probabilities[a.scene.choice].toFixed(2)}) switch=${a.switch_now.noul.toFixed(2)} int=${a.intensity.score.toFixed(1)} pal=${a.palette.choice} drop_soon=${a.drop_soon.noul.toFixed(2)} kime=${a.kime.noul.toFixed(2)} next+${(a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed ? Math.max(s.intervalBars, 4) : s.intervalBars}`,
+      `合議 :: ${a.phase.choice}(${a.phase.probabilities[a.phase.choice].toFixed(2)}) scene=${a.scene.choice}(${a.scene.probabilities[a.scene.choice].toFixed(2)}) switch=${a.switch_now.noul.toFixed(2)} int=${a.intensity.score.toFixed(1)} pal=${a.palette.choice} drop_soon=${a.drop_soon.noul.toFixed(2)} kime=${a.kime.noul.toFixed(2)} tokens=${r.usage.input_tokens} next+${(a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed ? Math.max(s.intervalBars, 4) : s.intervalBars}`,
     );
 
     // arm the speculative drop scene (and whether the drop is the 決め場)
     if (a.drop_soon.noul >= 0.5 && a.phase.choice !== 'drop') {
-      const armScene = a.drop_scene.choice;
-      const logo = a.kime_on_drop.noul >= 0.5;
+      // if the speculative questions were skipped this time, arm with the council's scene pick
+      const armScene = a.drop_scene?.choice ?? a.scene.choice;
+      const logo = (a.kime_on_drop?.noul ?? 0) >= 0.5;
       if (!s.armed || s.armed.scene !== armScene || s.armed.logo !== logo) {
-        this.log('armed', `drop_soon=${a.drop_soon.noul.toFixed(2)} → armed "${armScene}"${logo ? ' + ロゴ' : ''} (12小節有効, kime_on_drop ${a.kime_on_drop.noul.toFixed(2)})`);
+        this.log('armed', `drop_soon=${a.drop_soon.noul.toFixed(2)} → armed "${armScene}"${logo ? ' + ロゴ' : ''} (12小節有効, kime_on_drop ${a.kime_on_drop ? a.kime_on_drop.noul.toFixed(2) : '未質問'})`);
       }
       s.armed = { scene: armScene, decidedAt: performance.now(), untilBar: bar + 12, logo };
     }

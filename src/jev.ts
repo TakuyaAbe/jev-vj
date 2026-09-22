@@ -23,14 +23,15 @@ export interface JevAnswers {
   drop_soon: NoulAnswer;
   switch_now: NoulAnswer;
   scene: ChoiceAnswer<SceneId>;
-  drop_scene: ChoiceAnswer<SceneId>;
+  /** speculative scene for the drop (only asked when a drop is plausible) */
+  drop_scene?: ChoiceAnswer<SceneId>;
   intensity: ScoreAnswer;
   palette: ChoiceAnswer<PaletteId>;
   transition: ChoiceAnswer<TransitionId>;
   /** is this the 決め場: the peak moment that deserves the club logo */
   kime: NoulAnswer;
-  /** speculative: if the drop lands within 8 bars, is that moment the 決め場 */
-  kime_on_drop: NoulAnswer;
+  /** speculative: if the drop lands within 8 bars, is that moment the 決め場 (only asked when a drop is plausible) */
+  kime_on_drop?: NoulAnswer;
 }
 
 export interface JevResult {
@@ -106,6 +107,33 @@ export interface SetContext {
   userContext: string;
 }
 
+/**
+ * Short criteria for the scene questions. The full `Scene.description` is what
+ * a human reads; Jev gets ~30 characters per option so the two scene questions
+ * stay around 500 tokens instead of 2,500.
+ */
+export const SCENE_SHORT: Partial<Record<SceneId, string>> = {
+  particles: '粒子。中程度。安定した進行・グルーヴ',
+  tunnel: 'トンネル前進。高揚感。ビルド・ドロップ',
+  grid: '格子が脈動。硬質ミニマル。テクノの安定進行',
+  strobe: '白黒ストロボ。最大エネルギーのドロップ専用。短時間',
+  kaleido: '万華鏡。浮遊感。ブレイクダウン・イントロ',
+  waves: '波形リボン。柔らかい。メロディ・緩やかな展開',
+  warp: '流体の煙（GLSL）。サイケ。ディープ・ブレイクダウン',
+  lattice: '無限3D格子を突進（GLSL）。ビルド・ドロップ',
+  julia: 'フラクタル（GLSL）。催眠的。安定進行・ディープ',
+  voronoi: 'セルがビートで点灯（GLSL）。デジタル。テクノ・ドロップ',
+  galaxy: '銀河の粒子（3D）。壮大・浮遊。盛り上がりの入口',
+  terrain: '波形の地形と太陽（3D）。シンセウェーブ。中程度',
+  hina_petals: 'ひな祭り: 桃の花びら。柔らか。春・中程度まで',
+  hina_dan: 'ひな祭り: 七段飾り2D。象徴的。見せ場・決め場',
+  hina_mochi: 'ひな祭り: 菱餅タイル（GLSL）。ポップ。ドロップ・安定',
+  seigaiha: 'ひな祭り: 青海波（GLSL）。和・静か。イントロ・ブレイク',
+  hina_dan3d: 'ひな祭り: 七段飾り3D、カメラ回り込み。見せ場・決め場',
+};
+
+export const shortDescription = (sc: Scene): string => SCENE_SHORT[sc.id] ?? sc.description.split('。')[0]!;
+
 export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
   warm: '赤〜オレンジ〜琥珀の暖色。熱気、ピーク',
   cold: '青〜シアン〜白の寒色。深い、クール、浮遊',
@@ -115,13 +143,7 @@ export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
   hina: 'ひな祭り。桃色・若草色・白に金。春らしく華やかで柔らかい',
 };
 
-const INTENSITY_LEVELS = [
-  '静止に近い。ゆっくり漂う。ブレイクダウンやイントロ',
-  '控えめ。ビートに軽く反応する',
-  '中程度。ビートごとに明確に動く',
-  '激しい。速い動きと強い明滅',
-  '最大。ストロボ級の点滅と高速な動き。ドロップのピーク',
-];
+const INTENSITY_LEVELS = ['静止に近い（ブレイク・イントロ）', '控えめ', '中程度。ビートごとに動く', '激しい。速く強い明滅', '最大。ストロボ級（ドロップのピーク）'];
 
 const fmt = (x: number): string => x.toFixed(2);
 
@@ -149,7 +171,7 @@ export function buildState(agg: BarAggregator, set: SetContext, scenes: Scene[],
         last.high > 0.25 ? 'ハイハット/高域' : null,
       ].filter((x): x is string => x !== null)
     : [];
-  const barLines = h.slice(-12).map((b) =>
+  const barLines = h.slice(-8).map((b) =>
     `bar${b.bar} e${fmt(rel(b.energy, peakE))} sub${fmt(b.sub)} bf${fmt(b.bassFloor)} lm${fmt(b.lowmid)} m${fmt(b.mid)} h${fmt(b.high)} on${b.onsets}`,
   );
   const brightness = last ? (last.centroid > 2500 ? '明るい' : last.centroid > 1200 ? '中間' : '暗い') : '不明';
@@ -159,8 +181,7 @@ export function buildState(agg: BarAggregator, set: SetContext, scenes: Scene[],
     role: 'クラブのVJ（映像演出）。音声解析の数値から曲の展開を読み、次の数小節の映像を決める判断材料',
     judge: unit ? { name: `${unit.name}-${unit.number}（${unit.role}）`, stance: unit.stance } : undefined,
     context: set.userContext || '（ジャンル・雰囲気の指定なし）',
-    legend:
-      'recent_bars: e=音圧（セット最大=1） sub=キック帯域 bf=低域の持続（高いほどベースラインが鳴り続けている。キックだけなら低い） lm=低中域 m=中域 h=高域（いずれも直近ピーク基準の0〜1） on=1小節あたりのアタック数',
+    legend: 'recent_bars: e=音圧(セット最大=1) sub=キック帯域 bf=低域の持続(ベースライン) lm/m/h=低中/中/高域(0〜1) on=小節内アタック数',
     now: {
       bpm: Math.round(set.bpm),
       bar: set.bar,
@@ -188,12 +209,17 @@ export function buildState(agg: BarAggregator, set: SetContext, scenes: Scene[],
           ? 'まだ小節数が少なく、相対値の基準（最大）が確定していない。今が曲の序盤である可能性を考慮する'
           : undefined,
     },
-    scene_ids: scenes.map((s) => s.id),
+    scene_ids: scenes.map((sc) => sc.id),
   };
 }
 
-export function buildQuestions(scenes: Scene[], unit?: Unit): Record<string, unknown> {
-  const sceneCriteria = Object.fromEntries(scenes.map((s) => [s.id, s.description]));
+export interface QuestionOptions {
+  /** include the speculative drop questions (drop_scene, kime_on_drop) */
+  askDrop: boolean;
+}
+
+export function buildQuestions(scenes: Scene[], unit?: Unit, opts: QuestionOptions = { askDrop: true }): Record<string, unknown> {
+  const sceneCriteria = Object.fromEntries(scenes.map((sc) => [sc.id, shortDescription(sc)]));
   const judge = unit ? `\`judge.stance\` の立場で判断する。${unit.sceneHint}。` : '';
   const judgeSwitch = unit ? `\`judge.stance\` の立場で判断する。${unit.switchHint}。` : '';
   return {
@@ -201,43 +227,38 @@ export function buildQuestions(scenes: Scene[], unit?: Unit): Record<string, unk
       type: 'choice',
       instructions: '`now` と `recent_bars` の推移から、曲は今どのセクションにいるか',
       criteria: {
-        intro: '曲の導入部。キックなど少数の要素だけが鳴り、ベースラインや中高域が薄い。セット序盤で相対音圧が高くても要素が少なければこちら',
-        build: 'ビルドアップ。高域・アタック数・明るさが数小節かけて上がり続け、ドロップに向かっている',
-        drop: 'ドロップ。キック・持続するベースライン・中高域が揃ってフルに鳴り、エネルギーが最大付近で安定している',
-        breakdown: 'ブレイクダウン。直前よりキックや低域が抜け、エネルギーが大きく落ちて浮遊感がある',
-        steady: '大きな変化なく進行中。ドロップでもブレイクダウンでもない中程度の状態',
-        outro: '曲の終わり。要素が減っていき、次の曲へ向かう',
+        intro: '導入。キックなど少数の要素のみ、ベース・中高域が薄い（序盤は相対音圧が高くてもこちら）',
+        build: 'ビルドアップ。高域・アタック数・明るさが数小節かけて上がり続けている',
+        drop: 'ドロップ。キック・持続ベース・中高域が揃い、エネルギーが最大付近で安定',
+        breakdown: 'ブレイクダウン。キックや低域が抜け、エネルギーが大きく落ちた',
+        steady: '大きな変化のない中程度の進行',
+        outro: '終わり。要素が減っていく',
       },
     },
     drop_soon: {
       type: 'noul',
       instructions: '次の8小節以内にドロップ（低域とエネルギーの急上昇）が来るか',
-      criteria: {
-        true: 'ビルドアップの兆候があり、まもなくドロップが来る',
-        false: 'その兆候はない。または既にドロップの最中である',
-      },
+      criteria: { true: 'ビルドの兆候があり、まもなく来る', false: '兆候なし、または既にドロップ中' },
     },
     switch_now: {
       type: 'noul',
-      instructions:
-        `${judgeSwitch}今このタイミングで映像シーンを \`set.current_scene\` から別のものに切り替えるべきか。曲の展開が変わった直後や、同じシーンが16小節以上続いているときは切り替えが自然。頻繁すぎる切り替えは避ける`,
-      criteria: {
-        true: '切り替えるべき。展開が変わった、または現在のシーンが今の音に合っていない',
-        false: '維持すべき。現在のシーンが今の音に合っており、切り替えると落ち着かない',
-      },
+      instructions: `${judgeSwitch}今、映像シーンを \`set.current_scene\` から切り替えるべきか。展開が変わった直後や同じシーンが16小節以上続くときは自然。頻繁すぎる切替は避ける`,
+      criteria: { true: '切り替える。展開が変わった／今の音に合っていない', false: '維持する。今の音に合っている' },
     },
     scene: {
       type: 'choice',
-      instructions:
-        `${judge}次の数小節に最も合う映像シーン。\`set.current_scene\` をそのまま選んでもよい。\`set.previous_scenes\`（直近に使ったもの）の連発は避ける`,
+      instructions: `${judge}次の数小節に最も合う映像シーン。\`set.current_scene\` のままでもよい。\`set.previous_scenes\` の連発は避ける`,
       criteria: sceneCriteria,
     },
-    drop_scene: {
-      type: 'choice',
-      instructions:
-        'もし次の8小節以内にドロップが来た場合、その瞬間に切り替えるべき映像シーン（ドロップが来たときだけ使う先読みの判断）',
-      criteria: sceneCriteria,
-    },
+    ...(opts.askDrop
+      ? {
+          drop_scene: {
+            type: 'choice',
+            instructions: 'もし次の8小節以内にドロップが来たら、その瞬間に切り替えるシーン（先読み）',
+            criteria: sceneCriteria,
+          },
+        }
+      : {}),
     intensity: {
       type: 'score',
       instructions: '次の数小節の映像の激しさ',
@@ -250,29 +271,22 @@ export function buildQuestions(scenes: Scene[], unit?: Unit): Record<string, unk
     },
     kime: {
       type: 'noul',
-      instructions:
-        '今が「決め場」か。クラブ名のロゴを画面全面に出すのにふさわしい、曲の最高潮の瞬間か。ロゴは一晩に何度も出すものではなく、出せば「決まる」場面にだけ使う',
-      criteria: {
-        true: 'ドロップの頭や最大エネルギーの区間で、フロアが最も盛り上がる曲の一番いいところ。ここでロゴを出せば決まる',
-        false: '序盤・ビルドアップの途中・ブレイクダウン・平常の進行。ここでロゴを出すと興ざめする',
-      },
+      instructions: '今が「決め場」か。クラブ名ロゴを全面に出すのにふさわしい曲の最高潮か。ロゴは一晩に何度も出さず、出せば決まる場面だけ',
+      criteria: { true: 'ドロップの頭や最大エネルギーで、フロアが最も盛り上がる一番いいところ', false: '序盤・ビルド途中・ブレイクダウン・平常時。出すと興ざめ' },
     },
-    kime_on_drop: {
-      type: 'noul',
-      instructions: 'もし次の8小節以内にドロップが来た場合、その瞬間はロゴを出すべき決め場になるか（ドロップが来たときだけ使う先読みの判断）',
-      criteria: {
-        true: 'ビルドアップが十分に溜まっていて、来るドロップは曲の山場。ロゴを出せば決まる',
-        false: '小さな展開の変化に過ぎない、または既に山場を過ぎている。ロゴを出すほどではない',
-      },
-    },
+    ...(opts.askDrop
+      ? {
+          kime_on_drop: {
+            type: 'noul',
+            instructions: 'もし次の8小節以内にドロップが来たら、その瞬間はロゴを出すべき決め場か（先読み）',
+            criteria: { true: 'ビルドが十分溜まっていて、来るドロップは山場', false: '小さな変化に過ぎない／山場は過ぎた' },
+          },
+        }
+      : {}),
     transition: {
       type: 'choice',
       instructions: 'シーンを切り替える場合の切り替え方',
-      criteria: {
-        cut: '瞬時に切り替える。ドロップや明確な展開の切れ目',
-        crossfade: '1小節かけて滑らかに溶かす。緩やかな展開の変化',
-        flash: '白く光ってから切り替える。ビルドアップの頂点やアクセント',
-      },
+      criteria: { cut: '瞬時。ドロップや明確な切れ目', crossfade: '1小節で溶かす。緩やかな変化', flash: '白く光って切替。ビルドの頂点' },
     },
   };
 }
