@@ -9,7 +9,7 @@
     "narration": "node narration.mjs",
     "capture": "node capture.mjs",
     "studio": "remotion studio remotion/index.ts",
-    "render": "remotion render remotion/index.ts Howto out/jev-vj-howto.mp4 --codec h264",
+    "render": "remotion render remotion/index.ts Howto out/jev-vj-howto.mp4 --codec h264 --crf 22",
     "still": "remotion still remotion/index.ts Howto out/still.png"
   },
   "dependencies": {

@@ -424,12 +424,17 @@
               "type": "eval",
               "js": "window.vj.director.state.logo.untilBar = 1e9",
               "at": 2.6
+            },
+            {
+              "type": "key",
+              "key": "h",
+              "at": 5.4
             }
           ],
           "notes": [
             {
               "at": 0.9,
-              "until": 4.6,
+              "until": 4.2,
               "target": "button:Logo now (l)",
               "label": "手動トグル",
               "side": "left"
@@ -443,16 +448,26 @@
           "minSeconds": 7,
           "actions": [
             {
+              "type": "key",
+              "key": "h",
+              "at": 0.2
+            },
+            {
               "type": "type",
               "target": "input:main",
               "text": " NIGHT",
-              "at": 0.6
+              "at": 0.7
             },
             {
               "type": "select",
               "target": "select:pos",
               "value": "サブを下に",
-              "at": 4.4
+              "at": 3
+            },
+            {
+              "type": "key",
+              "key": "h",
+              "at": 4.6
             }
           ]
         },
@@ -460,18 +475,23 @@
           "id": "l_fonts",
           "subtitle": "Fonts: Google Fonts の family を選ぶ / 入力。「ランダム切替」で秒ごと or ビート同期でフォントが変わる",
           "narration": "フォントは Google Fonts から選べます。ランダム切替を入れると、指定した秒ごと、またはビートごとにフォントが変わります。",
-          "minSeconds": 11,
+          "minSeconds": 12,
           "actions": [
+            {
+              "type": "key",
+              "key": "h",
+              "at": 0.2
+            },
             {
               "type": "scrollTo",
               "target": "section:Fonts",
-              "at": 0.2
+              "at": 0.4
             },
             {
               "type": "select",
               "target": "select:ロゴ メイン",
               "value": "Dela Gothic One",
-              "at": 0.8
+              "at": 1
             },
             {
               "type": "select",
@@ -482,17 +502,22 @@
             {
               "type": "check",
               "target": "checkbox:ランダム切替",
-              "at": 5.8
+              "at": 5.4
             },
             {
               "type": "check",
               "target": "checkbox:ビート同期",
-              "at": 9
+              "at": 7.2
+            },
+            {
+              "type": "key",
+              "key": "h",
+              "at": -3
             },
             {
               "type": "key",
               "key": "l",
-              "at": -0.8
+              "at": -0.5
             }
           ]
         }

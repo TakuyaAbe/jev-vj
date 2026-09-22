@@ -50,6 +50,8 @@ npm run studio        # Remotion Studio で構成を調整（撮影前でも scr
 - **Demo track を音声ベッドに**: クリック後、ページの AudioBuffer を読み出して `public/audio/demo-track.wav` に書き、
   `timeline.json` の `demo.startMs` から合成側で同期再生（ナレーション中はダッキング）。129.5 秒の曲より撮影が長いので、
   ページ側の `AudioBufferSourceNode.loop = true` と合成側の `loop` を揃えてループさせる。
+- **Google Fonts を先読み**: アプリはフォントを選んだとき ~1.2 s しか待たない（`src/fonts.ts`）が、この回線では初回接続に ~3 s かかり「not found」になる。
+  撮影前にパネルの候補フォント全部の stylesheet と woff2 をブラウザキャッシュに入れてからリロードし、その後で録画を始める。
 - `/api/spotify` はスタブ（「osascript failed」の表示を出さない）。決め場ロゴは `l` で出したあと `eval` で `untilBar` を伸ばし、章の間ずっと出しておく。
 
 ## 合成（`remotion/`）

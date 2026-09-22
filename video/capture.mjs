@@ -60,13 +60,17 @@ const FIND_TIMEOUT = 10_000
 const NOTE_TIMEOUT_MS = 6000
 const TRACK_EVERY_MS = 200
 /** Settle time after the page is up before the first step. */
-const LEAD_IN_MS = 1200
+const LEAD_IN_MS = 1500
 /** Tail so the last step does not cut on the final frame. */
 const TAIL_MS = 1500
 /** The demo track is 129.5 s; it is looped in the page when the footage after the click is longer. */
 const DEMO_SECONDS = 129.5
 /** SCENES order in src/scenes/index.ts – the panel's scene grid and the number keys follow it. */
 const SCENE_ORDER = ['particles', 'tunnel', 'grid', 'strobe', 'kaleido', 'waves', 'warp', 'lattice', 'julia', 'voronoi', 'galaxy', 'terrain', 'hina_mochi', 'seigaiha', 'hina_dan3d', 'hina_petals', 'hina_dan']
+/** Google Fonts families the panel offers (src/fonts.ts JP_PRESETS / EN_PRESETS) and what the logo draws with them. */
+const JP_FONTS = ['Noto Sans JP', 'Zen Kaku Gothic New', 'Dela Gothic One', 'DotGothic16', 'Reggae One', 'RocknRoll One', 'Shippori Mincho B1', 'Yuji Syuku', 'Kaisei Decol', 'Hachi Maru Pop', 'Train One', 'Rampart One']
+const EN_FONTS = ['Bebas Neue', 'Anton', 'Unbounded', 'Orbitron', 'Space Grotesk', 'Inter', 'Michroma', 'Major Mono Display', 'Press Start 2P', 'Rubik Mono One', 'Syncopate', 'Monoton']
+const FONT_SAMPLES = { jp: '🍲闇鍋🍲 NIGHT', en: 'BAKUROCHO DOMINO CLUB PRESENTS' }
 const LAUNCH_ARGS = [
   '--autoplay-policy=no-user-gesture-required',
   '--use-gl=angle',
@@ -256,6 +260,48 @@ async function exportDemoTrack(page, file) {
   return { seconds: meta.length / meta.sampleRate, sampleRate: meta.sampleRate }
 }
 
+/* ------------------------------------------------------------------ font warm-up */
+
+/**
+ * The app loads Google Fonts on demand and gives a family ~1.2 s to arrive (src/fonts.ts). A cold
+ * connection to fonts.googleapis.com takes ~3 s here, so every pick would read "not found" on
+ * camera. Pull the same stylesheets and font files into the browser cache before filming; after the
+ * reload the app's own requests are served from cache and land well inside its window.
+ */
+async function warmFonts(page) {
+  const t = Date.now()
+  const result = await page.evaluate(async ([jp, en, samples]) => {
+    const inject = (fam, w) =>
+      new Promise((res) => {
+        const l = document.createElement('link')
+        l.rel = 'stylesheet'
+        l.href = `https://fonts.googleapis.com/css2?family=${fam.replace(/\s+/g, '+')}${w ? `:wght@${w}` : ''}&display=swap`
+        l.onload = () => res(true)
+        l.onerror = () => res(false)
+        document.head.append(l)
+      })
+    const fams = [...jp.map((f) => [f, samples.jp]), ...en.map((f) => [f, samples.en])]
+    await Promise.all(fams.flatMap(([f]) => [inject(f, null), inject(f, 700), inject(f, 900)]))
+    let ok = 0
+    await Promise.all(
+      fams.map(async ([f, sample]) => {
+        let n = 0
+        for (const w of [400, 700, 900]) {
+          try {
+            n += (await document.fonts.load(`${w} 40px "${f}"`, sample)).length
+          } catch {
+            /* weight does not exist */
+          }
+        }
+        if (n) ok++
+      }),
+    )
+    return { ok, total: fams.length }
+  }, [JP_FONTS, EN_FONTS, FONT_SAMPLES])
+  console.log(`fonts warmed: ${result.ok}/${result.total} families in ${Date.now() - t}ms`)
+  if (result.ok < result.total) warn(`${result.total - result.ok} Google Fonts families did not load during warm-up`)
+}
+
 /* ------------------------------------------------------------------ capture */
 
 const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS })
@@ -275,8 +321,23 @@ const page = await context.newPage()
 await page.route('**/api/spotify', (route) => route.fulfill({ json: { running: false } }))
 page.on('pageerror', (e) => warn(`page error: ${e.message.split('\n')[0]}`))
 
+console.log(`opening ${BASE}`)
+await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+await page.getByRole('button', { name: 'Demo track', exact: true }).waitFor({ state: 'visible', timeout: FIND_TIMEOUT })
+{
+  let timer
+  const timeout = new Promise((res) => {
+    timer = setTimeout(() => {
+      warn('font warm-up timed out after 25 s')
+      res()
+    }, 25_000)
+  })
+  await Promise.race([warmFonts(page).finally(() => clearTimeout(timer)), timeout])
+}
+
 const recorder = new ScreencastRecorder(page, join(RAW, 'app'))
-// Frame 0 of app.mp4 is this instant; the screencast starts right after.
+// Frame 0 of app.mp4 is this instant; the screencast starts right after, and the page reloads so the
+// footage opens on a fresh app (the warm-up left only the browser cache behind).
 const t0 = Date.now()
 await recorder.start()
 const elapsed = () => Date.now() - t0
@@ -284,9 +345,7 @@ const waitUntil = async (ms) => {
   const left = ms - elapsed()
   if (left > 0) await sleep(left)
 }
-
-console.log(`opening ${BASE}`)
-await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+await page.reload({ waitUntil: 'domcontentloaded' })
 await page.getByRole('button', { name: 'Demo track', exact: true }).waitFor({ state: 'visible', timeout: FIND_TIMEOUT })
 await waitUntil(LEAD_IN_MS)
 
