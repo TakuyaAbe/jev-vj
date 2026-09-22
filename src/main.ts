@@ -63,7 +63,15 @@ try {
 } catch {
   /* storage unavailable */
 }
+/** effects in 'jev' mode are the council's fx candidates */
+function syncFxPool(): void {
+  director.fxPool.clear();
+  for (const [id, m] of fxModes) if (m === 'jev') director.fxPool.add(id);
+  director.syncFx();
+}
+syncFxPool();
 function saveFxModes(): void {
+  syncFxPool();
   try {
     localStorage.setItem(FX_KEY, JSON.stringify(Object.fromEntries(fxModes)));
   } catch {
@@ -121,11 +129,29 @@ async function loadPluginFiles(files: File[]): Promise<void> {
 }
 exposeGlobalApi((l) => registerLoaded(l));
 
+/** eased 0..1 level of each 'jev' effect: fades in / out over about one bar when the council changes its pick */
+const jevFxLevel = new Map<string, number>();
 /** per-frame FX amounts from each effect's mode */
 function effectChain(input: RenderInput): { fx: Effect; amount: number }[] {
   const out: { fx: Effect; amount: number }[] = [];
+  const chosen = director.state.fx;
+  const step = input.dt / Math.max(0.5, input.bpm > 0 ? (60 / input.bpm) * 4 : 2);
   for (const fx of EFFECTS) {
     const mode = fxModes.get(fx.id);
+    if (mode === 'jev') {
+      const target = fx.id === chosen ? 1 : 0;
+      const cur = jevFxLevel.get(fx.id) ?? 0;
+      const lv = target > cur ? Math.min(target, cur + step) : Math.max(target, cur - step);
+      jevFxLevel.set(fx.id, lv);
+      if (lv <= 0.001) continue;
+      const e = lv * lv * (3 - 2 * lv);
+      // calm sections get a light touch; high intensity punches the mix on every beat
+      const punch = Math.max(0, input.intensity - 0.55) * 1.4;
+      const amount = e * Math.min(1, 0.35 + 0.45 * input.intensity + punch * input.beatPulse);
+      out.push({ fx, amount });
+      continue;
+    }
+    jevFxLevel.delete(fx.id);
     if (!mode || mode === 'off') continue;
     const amount =
       mode === 'on' ? 1 : mode === 'beat' ? input.beatPulse * (0.4 + 0.6 * input.intensity) : Math.max(0, Math.min(1, (input.intensity - 0.3) / 0.5));
@@ -420,6 +446,7 @@ onRegistryChange(() => {
   ui.setEnabledScenes(director.enabledScenes);
   ui.setActiveScene(director.state.scene.id);
   ui.setEffects(EFFECTS, fxModes);
+  director.syncFx();
 });
 // restore runtime plugins, then compile every shader in idle time (no stall on the first cut)
 void (async () => {
@@ -710,7 +737,7 @@ function frame(now: number): void {
   renderer.clearOverlay();
   const dots = [0, 1, 2, 3].map((i) => (i === lastBeat.beatInBar ? '●' : '○')).join('');
   terminal.status = f
-    ? `${dots} bar ${lastBeat.bar} · ${lastBeat.bpm ? lastBeat.bpm.toFixed(0) : '---'}bpm ${bars5(f.rms)}${f.onset ? '◆' : ' '} · ${s.scene.id} int${s.intensity.toFixed(2)} ${s.paletteId} · ${s.lastPhase ?? '--'}${s.armed ? ` · armed→${s.armed.scene}` : ''}${s.logo.active ? ' · LOGO' : ''}${s.inFlight ? ' · MAGI…' : ''}`
+    ? `${dots} bar ${lastBeat.bar} · ${lastBeat.bpm ? lastBeat.bpm.toFixed(0) : '---'}bpm ${bars5(f.rms)}${f.onset ? '◆' : ' '} · ${s.scene.id} int${s.intensity.toFixed(2)} ${s.paletteId} · ${s.lastPhase ?? '--'}${s.armed ? ` · armed→${s.armed.scene}` : ''}${s.fx ? ` · fx:${s.fx}` : now - s.fxChangedAt < 4000 && s.fxChangedAt > 0 ? ' · fx:none' : ''}${s.logo.active ? ' · LOGO' : ''}${s.inFlight ? ' · MAGI…' : ''}`
     : '(no audio)';
   terminal.draw(renderer.overlayCtx, renderer.w, renderer.h, now, logo.active ? 0.35 : 1);
   const panelEl = document.getElementById('panel');

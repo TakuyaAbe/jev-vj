@@ -10,7 +10,7 @@ export interface TrackInfo {
 }
 
 /** off / on (full) / auto (follows Jev's intensity) / beat (pulses on the beat) */
-export type EffectMode = 'off' | 'on' | 'auto' | 'beat';
+export type EffectMode = 'off' | 'on' | 'auto' | 'beat' | 'jev';
 
 export const GROUP_LABELS: Record<string, string> = {
   hina: 'ひな祭り',
@@ -491,7 +491,7 @@ export class Ui {
       const name = el('span', 'fxname', fx.name);
       name.title = fx.error ? `エラー: ${fx.error}` : fx.description;
       const sel = el('select');
-      for (const m of ['off', 'auto', 'beat', 'on'] as const) sel.append(new Option(m, m));
+      for (const m of ['off', 'jev', 'auto', 'beat', 'on'] as const) sel.append(new Option(m === 'jev' ? 'jev (AI)' : m, m));
       sel.value = modes.get(fx.id) ?? 'off';
       sel.onchange = () => this.cb.setEffectMode(fx.id, sel.value as EffectMode);
       row.append(name, sel);
@@ -587,6 +587,7 @@ export class Ui {
             transition: c.transition.choice,
             kime: c.kime.noul.toFixed(2),
             kime_on_drop: c.kime_on_drop ? c.kime_on_drop.noul.toFixed(2) : '(未質問)',
+            fx: c.fx?.choice ?? '(未質問)',
           },
           null,
           1,
@@ -664,6 +665,7 @@ export class Ui {
       ...kv('intensity', d.intensity.toFixed(2)),
       ...kv('palette', d.paletteId),
       ...kv('armed', d.armed ? `${d.armed.scene} (until bar ${d.armed.untilBar})` : '--'),
+      ...kv('fx (jev)', d.fx ?? '--'),
     );
     void sectionHint;
   }
@@ -710,6 +712,7 @@ export class Ui {
     probs(`intensity = ${a.intensity.score.toFixed(2)}`, a.intensity.probabilities, String(Math.round(a.intensity.score)));
     probs('palette', a.palette.probabilities, a.palette.choice);
     probs('transition', a.transition.probabilities, a.transition.choice);
+    if (a.fx) probs(`fx → ${d.fx ?? 'none'}`, a.fx.probabilities, d.fx ?? 'none');
     this.answersEl.replaceChildren(...blocks);
   }
 

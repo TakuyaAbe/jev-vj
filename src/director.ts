@@ -1,7 +1,7 @@
 import type { BarAggregator, Jump } from './features';
 import { buildQuestions, buildState, callJev, UNITS, type JevAnswers, type JevResult, type SetContext, type Unit, type UnitId } from './jev';
-import { PALETTES, SCENES, sceneById } from './scenes';
-import type { Palette, PaletteId, PhaseId, Scene, SceneId, TransitionId } from './types';
+import { EFFECTS, PALETTES, SCENES, sceneById } from './scenes';
+import type { Effect, Palette, PaletteId, PhaseId, Scene, SceneId, TransitionId } from './types';
 
 export type DecisionReason = 'interval' | 'change:drop' | 'change:cut' | 'manual' | 'start';
 
@@ -70,6 +70,10 @@ export interface DirectorState {
   magiMode: 'always' | 'changes' | 'single';
   /** last consensus drop_soon; decides whether the speculative drop questions are asked next time */
   lastDropSoon: number;
+  /** post-FX chosen by the council (an effect id in 'jev' mode), null = none */
+  fx: string | null;
+  /** performance.now() of the last fx change, for the brief status display */
+  fxChangedAt: number;
 }
 
 const USD_PER_INPUT_TOKEN = 0.042 / 1_000_000;
@@ -130,6 +134,7 @@ function consensusOf(results: JevResult[]): JevAnswers {
     transition: voteChoice(A.map((a) => a.transition)),
     kime: { type: 'noul', noul: mean(A.map((a) => a.kime.noul)) },
     kime_on_drop: A.every((a) => a.kime_on_drop) ? { type: 'noul', noul: mean(A.map((a) => a.kime_on_drop!.noul)) } : undefined,
+    fx: A.every((a) => a.fx) ? voteChoice(A.map((a) => a.fx!)) : undefined,
   };
 }
 
@@ -177,6 +182,8 @@ export class Director {
   private deliberationSeq = 0;
   /** scenes Jev may choose from (empty = all) */
   readonly enabledScenes = new Set<SceneId>();
+  /** effect ids in 'jev' mode: the pool the council picks post-FX from (empty = the fx question is not asked) */
+  readonly fxPool = new Set<string>();
   userContext = '';
   onLog: ((e: LogEntry) => void) | null = null;
   onDecision: ((r: JevResult, reason: DecisionReason) => void) | null = null;
@@ -210,6 +217,8 @@ export class Director {
       paused: false,
       magiMode: 'always',
       lastDropSoon: 0,
+      fx: null,
+      fxChangedAt: 0,
     };
   }
 
@@ -223,6 +232,7 @@ export class Director {
     s.last = null;
     s.lastPhase = null;
     s.deliberation = null;
+    s.fx = null;
     s.logo = { active: false, untilBar: -1, cooldownUntilBar: -1, source: null };
     this.onLogo?.(false);
     this.sceneStartBar = 0;
@@ -265,6 +275,20 @@ export class Director {
     const ok = SCENES.filter((sc) => !sc.error);
     const c = ok.filter((sc) => this.enabledScenes.has(sc.id));
     return c.length > 0 ? c : ok;
+  }
+
+  /** The effects the council may choose from (effects in 'jev' mode that compiled). */
+  fxCandidates(): Effect[] {
+    return EFFECTS.filter((fx) => !fx.error && this.fxPool.has(fx.id));
+  }
+
+  /** Drop the chosen fx if it left the pool (mode changed / plugin removed). */
+  syncFx(): void {
+    const s = this.state;
+    if (s.fx && !this.fxCandidates().some((fx) => fx.id === s.fx)) {
+      s.fx = null;
+      s.fxChangedAt = performance.now();
+    }
   }
 
   /** A scene was re-registered under the same id (hot reload / re-dropped file): point at the new object. */
@@ -368,6 +392,8 @@ export class Director {
       lastSwitchReason: this.lastSwitchReason,
       userContext: this.userContext,
     };
+    const fxCands = this.fxCandidates();
+    if (fxCands.length > 0) set.currentFx = s.fx ?? 'none';
     const triggered = reason !== 'interval';
     const units: Unit[] = s.magiMode === 'always' || (s.magiMode === 'changes' && (triggered || s.armed !== null)) ? UNITS : [UNITS[0]!];
     // the speculative drop questions cost ~1/3 of the tokens; skip them when the music is settled
@@ -391,7 +417,7 @@ export class Director {
     const cands0 = this.candidates();
     const input = buildState(this.agg, set, cands0);
     d.input = input;
-    this.log('magi', `MAGI #${d.id} bar ${bar} :: 審議開始 [${reason}] units=${units.length} 候補=${cands0.length}${askDrop ? '' : ' 先読み省略'}`);
+    this.log('magi', `MAGI #${d.id} bar ${bar} :: 審議開始 [${reason}] units=${units.length} 候補=${cands0.length}${fxCands.length ? ` fx候補=${fxCands.length}` : ''}${askDrop ? '' : ' 先読み省略'}`);
     this.log('magi', `  入力 :: ${summarizeInput(input, set)}`);
 
     await Promise.all(
@@ -399,7 +425,7 @@ export class Director {
         const unit = uv.unit;
         try {
           const cands = this.candidates();
-          const r = await callJev(buildState(this.agg, set, cands, unit), buildQuestions(cands, unit, { askDrop }), signal);
+          const r = await callJev(buildState(this.agg, set, cands, unit), buildQuestions(cands, unit, { askDrop, fx: fxCands }), signal);
           uv.result = r;
           uv.arrivedAt = performance.now();
           uv.proposal = r.answers.switch_now.noul >= 0.5 && r.answers.scene.choice !== s.scene.id ? r.answers.scene.choice : 'keep';
@@ -468,8 +494,23 @@ export class Director {
     }
     this.log(
       'jev',
-      `合議 :: ${a.phase.choice}(${a.phase.probabilities[a.phase.choice].toFixed(2)}) scene=${a.scene.choice}(${(a.scene.probabilities[a.scene.choice] ?? 0).toFixed(2)}) switch=${a.switch_now.noul.toFixed(2)} int=${a.intensity.score.toFixed(1)} pal=${a.palette.choice} drop_soon=${a.drop_soon.noul.toFixed(2)} kime=${a.kime.noul.toFixed(2)} tokens=${r.usage.input_tokens} next+${(a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed ? Math.max(s.intervalBars, 4) : s.intervalBars}`,
+      `合議 :: ${a.phase.choice}(${a.phase.probabilities[a.phase.choice].toFixed(2)}) scene=${a.scene.choice}(${(a.scene.probabilities[a.scene.choice] ?? 0).toFixed(2)}) switch=${a.switch_now.noul.toFixed(2)} int=${a.intensity.score.toFixed(1)} pal=${a.palette.choice} drop_soon=${a.drop_soon.noul.toFixed(2)} kime=${a.kime.noul.toFixed(2)}${a.fx ? ` fx=${a.fx.choice}` : ''} tokens=${r.usage.input_tokens} next+${(a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed ? Math.max(s.intervalBars, 4) : s.intervalBars}`,
     );
+
+    // post-FX: switch only on a clear preference so the look does not flicker between deliberations
+    if (a.fx) {
+      const pool = this.fxCandidates();
+      const want = a.fx.choice === 'none' || !pool.some((fx) => fx.id === a.fx!.choice) ? null : a.fx.choice;
+      const cur = s.fx && pool.some((fx) => fx.id === s.fx) ? s.fx : null;
+      const pWant = a.fx.probabilities[want ?? 'none'] ?? 0;
+      const pCur = a.fx.probabilities[cur ?? 'none'] ?? 0;
+      if (want !== cur && (cur !== s.fx || pWant - pCur >= 0.1)) {
+        const name = (id: string | null): string => (id ? (EFFECTS.find((fx) => fx.id === id)?.name ?? id) : 'なし');
+        this.log('switch', `FX ${name(cur)} → ${name(want)} (fx ${pWant.toFixed(2)} vs ${pCur.toFixed(2)})`);
+        s.fx = want;
+        s.fxChangedAt = performance.now();
+      }
+    }
 
     // arm the speculative drop scene (and whether the drop is the 決め場)
     if (a.drop_soon.noul >= 0.5 && a.phase.choice !== 'drop') {

@@ -4,7 +4,7 @@ import { makeShadertoyScene } from '../gl/shadertoy';
 import { makeShaderScene } from '../gl/shader-scene';
 import common from '../gl/shaders/common.glsl?raw';
 import * as api from './api';
-import { baseName, detectShaderFormat, parseCommentMeta, slug, titleFromFile } from './meta';
+import { baseName, detectShaderFormat, parseCommentMeta, slug, SOURCE_END, sourceStart, stripDirectives, titleFromFile } from './meta';
 
 export interface Loaded {
   scenes: Scene[];
@@ -42,7 +42,7 @@ export function fromShaderSource(text: string, path: string, opts: { idPrefix?: 
         short: meta.short,
         maxBars: meta.maxBars,
         source: path,
-        frag: `${common}\n${text}`,
+        frag: `${common}\n${sourceStart(path)}\n${stripDirectives(text)}\n${SOURCE_END}`,
       }),
     ],
     effects: [],

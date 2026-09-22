@@ -3,7 +3,7 @@ import type { Effect, RenderInput, Scene } from '../types';
 import { GlContext } from './context';
 import { AudioTextures, noiseTexture, updateAudioTextures } from './audio-texture';
 import { copyTexture, FULLSCREEN_VERT, fullscreenCamera, fullscreenScene, makeTarget } from './fullscreen';
-import { stripDirectives, type PluginMeta } from '../plugins/meta';
+import { SOURCE_END, sourceStart, stripDirectives, type PluginMeta } from '../plugins/meta';
 
 /**
  * ISF (Interactive Shader Format, https://isf.video) runtime on three.js.
@@ -11,8 +11,21 @@ import { stripDirectives, type PluginMeta } from '../plugins/meta';
  * Supported: the JSON header, TIME / TIMEDELTA / FRAMEINDEX / RENDERSIZE / DATE /
  * PASSINDEX, inputs float / bool / long / event / color / point2D / image / audio /
  * audioFFT, multi-pass PASSES with TARGET / PERSISTENT / FLOAT / WIDTH / HEIGHT,
- * and the IMG_* macros. Generators become scenes; files with an `inputImage`
- * input (filters) become stage effects.
+ * and the IMG_* macros (IMG_PIXEL / IMG_NORM_PIXEL / IMG_THIS_PIXEL /
+ * IMG_THIS_NORM_PIXEL / IMG_SIZE). Generators become scenes; files with an
+ * `inputImage` input (filters) become stage effects.
+ *
+ * Compatibility notes:
+ *  - long inputs with VALUES / LABELS: DEFAULT (or VALUES[0]) is used; a bind picks
+ *    an entry of VALUES from the audio value instead of scaling MIN..MAX.
+ *  - point2D: DEFAULT, else the midpoint of MIN / MAX, else (0.5, 0.5).
+ *  - ISFVSN 1 files: vv_FragNormCoord is aliased, and the top-level PERSISTENT_BUFFERS
+ *    (array of names or { name: { WIDTH, HEIGHT, FLOAT } }) is merged into PASSES.
+ *  - IMPORTED images (v2 dict or v1 array) cannot be fetched from a single file: each
+ *    is bound to a 1x1 black texture and listed in `warnings` / the console.
+ *  - pass WIDTH / HEIGHT accept "$WIDTH", "$HEIGHT", "$<input name>" and
+ *    floor / ceil / round / min / max / abs / pow / sqrt.
+ *  - Transitions (startImage / endImage) and custom vertex shaders are not supported.
  *
  * Jev extension (ignored by other ISF hosts):
  *   "JEVJ": { "short": "...", "maxBars": 8, "bind": { "zoom": "bass", "amt": { "src": "intensity", "min": 0.2, "max": 1 } } }
@@ -30,6 +43,7 @@ interface IsfInput {
   MAX?: unknown;
   IDENTITY?: unknown;
   VALUES?: number[];
+  LABELS?: string[];
 }
 interface IsfPass {
   TARGET?: string;
@@ -47,6 +61,8 @@ export interface IsfHeader {
   INPUTS?: IsfInput[];
   PASSES?: IsfPass[];
   IMPORTED?: unknown;
+  /** ISFVSN 1 only */
+  PERSISTENT_BUFFERS?: string[] | Record<string, IsfPass>;
   JEVJ?: PluginMeta & { bind?: Record<string, BindSpec>; palette?: boolean };
 }
 type BindSpec = string | { src: string; min?: number; max?: number };
@@ -67,8 +83,11 @@ function audioValue(input: RenderInput, key: AudioKey, beatEdge: boolean): numbe
 
 const truthy = (v: unknown): boolean => v === true || v === 1 || v === '1' || v === 'true';
 
-/** Split `/*{ json }*\/ glsl` and parse the JSON leniently (trailing commas, // comments). */
-export function parseIsf(src: string): { header: IsfHeader; body: string } {
+/**
+ * Split `/*{ json }*\/ glsl` and parse the JSON leniently (trailing commas, // comments).
+ * `bodyLine` = number of file lines before the body (for error line mapping).
+ */
+export function parseIsf(src: string): { header: IsfHeader; body: string; bodyLine: number } {
   const m = /^\s*\/\*([\s\S]*?)\*\//.exec(src);
   if (!m) throw new Error('ISF: JSON header comment not found');
   const json = m[1]!
@@ -80,7 +99,45 @@ export function parseIsf(src: string): { header: IsfHeader; body: string } {
   } catch (e) {
     throw new Error(`ISF: header JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { header, body: src.slice(m[0].length) };
+  if (!header || typeof header !== 'object') throw new Error('ISF: header is not a JSON object');
+  if (header.INPUTS !== undefined && !Array.isArray(header.INPUTS)) throw new Error('ISF: INPUTS must be an array');
+  if (header.PASSES !== undefined && !Array.isArray(header.PASSES)) throw new Error('ISF: PASSES must be an array');
+  const lines = m[0].split('\n').length - 1;
+  return { header, body: src.slice(m[0].length), bodyLine: lines };
+}
+
+/** PASSES with ISF 1's PERSISTENT_BUFFERS folded in (buffer settings fill gaps in the pass). */
+function normalizePasses(h: IsfHeader): IsfPass[] {
+  const passes = (h.PASSES ?? []).map((p) => ({ ...p }));
+  const pb = h.PERSISTENT_BUFFERS;
+  if (!pb) return passes;
+  const entries: [string, IsfPass][] = Array.isArray(pb) ? pb.filter((n) => typeof n === 'string').map((n) => [n, {}]) : Object.entries(pb).map(([n, v]) => [n, v && typeof v === 'object' ? v : {}]);
+  for (const [name, cfg] of entries) {
+    const p = passes.find((x) => x.TARGET === name);
+    if (p) {
+      p.PERSISTENT = true;
+      p.WIDTH ??= cfg.WIDTH;
+      p.HEIGHT ??= cfg.HEIGHT;
+      p.FLOAT ??= cfg.FLOAT;
+    }
+  }
+  return passes;
+}
+
+/** Names of IMPORTED images: v2 `{ name: { PATH } }` or v1 `[{ NAME, PATH }]`. */
+function importedNames(h: IsfHeader): string[] {
+  const imp = h.IMPORTED;
+  if (!imp || typeof imp !== 'object') return [];
+  if (Array.isArray(imp)) return imp.map((x) => (x && typeof x === 'object' ? (x as { NAME?: unknown }).NAME : null)).filter((n): n is string => typeof n === 'string');
+  return Object.keys(imp);
+}
+
+let black: THREE.DataTexture | null = null;
+function blackTexture(): THREE.DataTexture {
+  if (black) return black;
+  black = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  black.needsUpdate = true;
+  return black;
 }
 
 /** Evaluate "$WIDTH/2", "floor($HEIGHT*0.5)" etc. without eval on arbitrary text. */
@@ -135,7 +192,9 @@ function expandImgMacros(src: string): string {
       default:
         rep = `_${img}_imgSize`;
     }
-    out += src.slice(i, start) + rep;
+    // keep the line count when a macro call spans lines (error line mapping)
+    const nl = src.slice(start, j).split('\n').length - 1;
+    out += src.slice(i, start) + rep + '\n'.repeat(nl);
     i = j;
     re.lastIndex = j;
   }
@@ -150,6 +209,7 @@ const GLSL_TYPE: Record<string, string> = {
   color: 'vec4',
   point2D: 'vec2',
   image: 'sampler2D',
+  cube: 'samplerCube',
   audio: 'sampler2D',
   audioFFT: 'sampler2D',
 };
@@ -205,7 +265,14 @@ function makeBinding(inp: IsfInput, spec: BindSpec | undefined, paletteIdx: numb
   if (!src) return null;
   const key = src;
   if (inp.TYPE === 'bool' || inp.TYPE === 'event') return { input: inp, apply: (u, i, e) => (u.value = audioValue(i, key, e) > 0.5) };
-  if (inp.TYPE === 'long') return { input: inp, apply: (u, i, e) => (u.value = Math.round(min + (max - min) * audioValue(i, key, e))) };
+  if (inp.TYPE === 'long') {
+    const vals = Array.isArray(inp.VALUES) ? inp.VALUES.filter((v) => typeof v === 'number') : [];
+    if (vals.length && typeof spec !== 'object') {
+      // pop-up menu input: step through VALUES instead of scaling 0..1
+      return { input: inp, apply: (u, i, e) => (u.value = Math.round(vals[Math.min(vals.length - 1, Math.floor(Math.max(0, audioValue(i, key, e)) * vals.length))]!)) };
+    }
+    return { input: inp, apply: (u, i, e) => (u.value = Math.round(min + (max - min) * audioValue(i, key, e))) };
+  }
   if (inp.TYPE === 'float') return { input: inp, apply: (u, i, e) => (u.value = min + (max - min) * audioValue(i, key, e)) };
   return null;
 }
@@ -219,14 +286,17 @@ function defaultValue(inp: IsfInput): unknown {
     case 'event':
       return truthy(d);
     case 'long':
-      return Math.round(num(d, inp.VALUES?.[0] ?? 0));
+      return Math.round(num(d, num(Array.isArray(inp.VALUES) ? inp.VALUES[0] : undefined, num(inp.MIN, 0))));
     case 'color': {
       const a = Array.isArray(d) ? d : [1, 1, 1, 1];
       return new THREE.Vector4(num(a[0], 1), num(a[1], 1), num(a[2], 1), num(a[3], 1));
     }
     case 'point2D': {
-      const a = Array.isArray(d) ? d : [0.5, 0.5];
-      return new THREE.Vector2(num(a[0], 0.5), num(a[1], 0.5));
+      if (Array.isArray(d)) return new THREE.Vector2(num(d[0], 0.5), num(d[1], 0.5));
+      const lo = Array.isArray(inp.MIN) ? inp.MIN : null;
+      const hi = Array.isArray(inp.MAX) ? inp.MAX : null;
+      if (lo && hi) return new THREE.Vector2((num(lo[0], 0) + num(hi[0], 1)) / 2, (num(lo[1], 0) + num(hi[1], 1)) / 2);
+      return new THREE.Vector2(0.5, 0.5);
     }
     default:
       return null;
@@ -246,6 +316,12 @@ export class IsfProgram {
   readonly isFilter: boolean;
   readonly isTransition: boolean;
   private readonly body: string;
+  private readonly bodyLine: number;
+  private readonly file: string;
+  private readonly passes: IsfPass[];
+  /** non-fatal compatibility problems (e.g. IMPORTED images replaced by black) */
+  readonly warnings: string[] = [];
+  private warned = false;
   private scene: THREE.Scene | null = null;
   private mat: THREE.ShaderMaterial | null = null;
   private uniforms: Record<string, THREE.IUniform> = {};
@@ -256,10 +332,13 @@ export class IsfProgram {
   private beatSeen = -1;
   error: string | null = null;
 
-  constructor(src: string) {
-    const { header, body } = parseIsf(src);
+  constructor(src: string, file = 'shader.fs') {
+    const { header, body, bodyLine } = parseIsf(src);
     this.header = header;
     this.body = body;
+    this.bodyLine = bodyLine;
+    this.file = file;
+    this.passes = normalizePasses(header);
     const inputs = header.INPUTS ?? [];
     this.isFilter = inputs.some((i) => i.NAME === 'inputImage' && i.TYPE === 'image');
     this.isTransition = inputs.some((i) => i.NAME === 'startImage') && inputs.some((i) => i.NAME === 'endImage');
@@ -289,10 +368,21 @@ export class IsfProgram {
     const usePalette = h.JEVJ?.palette !== false;
     let colorIdx = 0;
     const samplers: string[] = [];
+    const declared = new Set<string>();
     for (const inp of h.INPUTS ?? []) {
+      if (!inp || typeof inp.NAME !== 'string' || !/^[A-Za-z_]\w*$/.test(inp.NAME)) continue;
       const t = GLSL_TYPE[inp.TYPE];
-      if (!t) continue;
+      if (!t) {
+        this.warnings.push(`input "${inp.NAME}": unsupported TYPE "${inp.TYPE}"`);
+        continue;
+      }
+      if (declared.has(inp.NAME)) continue;
+      declared.add(inp.NAME);
       decl.push(`uniform ${t} ${inp.NAME};`);
+      if (t === 'samplerCube') {
+        u[inp.NAME] = { value: null };
+        continue;
+      }
       if (t === 'sampler2D') {
         samplers.push(inp.NAME);
         u[inp.NAME] = { value: inp.TYPE === 'audio' ? null : inp.TYPE === 'audioFFT' ? null : noiseTexture() };
@@ -302,8 +392,16 @@ export class IsfProgram {
       const b = makeBinding(inp, binds[inp.NAME], inp.TYPE === 'color' ? colorIdx++ : 0, usePalette);
       if (b) this.bindings.push(b);
     }
-    for (const p of h.PASSES ?? []) {
-      if (!p.TARGET || samplers.includes(p.TARGET)) continue;
+    const imported = importedNames(h).filter((n) => /^[A-Za-z_]\w*$/.test(n) && !declared.has(n));
+    for (const n of imported) {
+      declared.add(n);
+      samplers.push(n);
+      decl.push(`uniform sampler2D ${n};`);
+      u[n] = { value: blackTexture() };
+    }
+    if (imported.length) this.warnings.push(`IMPORTED image(s) ${imported.join(', ')} are not loaded; bound to black`);
+    for (const p of this.passes) {
+      if (!p.TARGET || samplers.includes(p.TARGET) || declared.has(p.TARGET)) continue;
       samplers.push(p.TARGET);
       decl.push(`uniform sampler2D ${p.TARGET};`);
       u[p.TARGET] = { value: null };
@@ -314,17 +412,19 @@ export class IsfProgram {
     }
     this.uniforms = u;
     // some ISF files write `varying vec2 isf_FragNormCoord;` themselves; drop the duplicate
-    const body = expandImgMacros(stripDirectives(this.body)).replace(/^\s*varying\s+vec2\s+(isf|vv)_FragNormCoord\s*;/gm, '');
+    // (blanked, not removed, so line numbers survive)
+    const body = expandImgMacros(stripDirectives(this.body)).replace(/^[ \t]*varying\s+vec2\s+(isf|vv)_FragNormCoord\s*;/gm, '');
     this.mat = new THREE.ShaderMaterial({
       uniforms: u,
       vertexShader: FULLSCREEN_VERT,
-      fragmentShader: `${decl.join('\n')}\n${body}`,
+      fragmentShader: `${decl.join('\n')}\n${sourceStart(this.file, this.bodyLine)}\n${body}\n${SOURCE_END}`,
       depthTest: false,
       depthWrite: false,
     });
     this.scene = fullscreenScene(this.mat).scene;
-    this.buffers = (h.PASSES ?? [])
-      .filter((p): p is IsfPass & { TARGET: string } => !!p.TARGET)
+    const seen = new Set<string>();
+    this.buffers = this.passes
+      .filter((p): p is IsfPass & { TARGET: string } => !!p.TARGET && !seen.has(p.TARGET) && !!seen.add(p.TARGET))
       .map((p) => ({ name: p.TARGET, pass: p, rt: [makeTarget(4, 4, truthy(p.FLOAT)), makeTarget(4, 4, truthy(p.FLOAT))], read: 0 }));
   }
 
@@ -369,25 +469,30 @@ export class IsfProgram {
     u.FRAMEINDEX!.value = this.frame++;
     const d = new Date();
     (u.DATE!.value as THREE.Vector4).set(d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000);
+    if (this.warnings.length && !this.warned && (this.warned = true)) console.warn(`[jev-vj] ISF ${this.file}: ${this.warnings.join('; ')}`);
     for (const b of this.bindings) b.apply(u[b.input.NAME]!, input, beatEdge);
     for (const inp of this.header.INPUTS ?? []) {
       if (inp.TYPE === 'audio') u[inp.NAME]!.value = at.wave;
       else if (inp.TYPE === 'audioFFT') u[inp.NAME]!.value = at.fft;
       else if (inp.TYPE === 'image' && inp.NAME === 'inputImage' && inputImage) u[inp.NAME]!.value = inputImage;
-      if (GLSL_TYPE[inp.TYPE] === 'sampler2D') {
+      if (GLSL_TYPE[inp.TYPE] === 'sampler2D' && u[`_${inp.NAME}_imgSize`]) {
         const tex = u[inp.NAME]!.value as THREE.Texture | null;
         const img = tex?.image as { width?: number; height?: number } | undefined;
         (u[`_${inp.NAME}_imgSize`]!.value as THREE.Vector2).set(img?.width ?? W, img?.height ?? H);
       }
     }
     const vars: Record<string, number> = { WIDTH: W, HEIGHT: H };
-    for (const inp of this.header.INPUTS ?? []) if (typeof u[inp.NAME]?.value === 'number') vars[inp.NAME] = u[inp.NAME]!.value as number;
+    for (const inp of this.header.INPUTS ?? []) {
+      const v = u[inp.NAME]?.value;
+      if (typeof v === 'number') vars[inp.NAME] = v;
+      else if (typeof v === 'boolean') vars[inp.NAME] = v ? 1 : 0;
+    }
     for (const b of this.buffers) {
       const w = evalSize(b.pass.WIDTH, vars, W);
       const h = evalSize(b.pass.HEIGHT, vars, H);
       for (const rt of b.rt) if (rt.width !== w || rt.height !== h) rt.setSize(w, h);
     }
-    const passes = this.header.PASSES?.length ? this.header.PASSES : [{} as IsfPass];
+    const passes = this.passes.length ? this.passes : [{} as IsfPass];
     const bind = (): void => {
       for (const b of this.buffers) {
         u[b.name]!.value = b.rt[b.read].texture;
@@ -434,7 +539,7 @@ function describe(h: IsfHeader, fallbackName: string): { name: string; descripti
 }
 
 export function makeIsfScene(src: string, opts: IsfOptions): Scene {
-  const prog = new IsfProgram(src);
+  const prog = new IsfProgram(src, opts.source);
   const h = prog.header;
   const { name, description } = describe(h, opts.fallbackName);
   const scene: Scene = {
@@ -464,7 +569,7 @@ export function makeIsfScene(src: string, opts: IsfOptions): Scene {
 
 /** An ISF filter as a stage effect: the 2D stage is uploaded as `inputImage` and replaced by the result. */
 export function makeIsfEffect(src: string, opts: IsfOptions): Effect {
-  const prog = new IsfProgram(src);
+  const prog = new IsfProgram(src, opts.source);
   const h = prog.header;
   const { name, description } = describe(h, opts.fallbackName);
   let stageTex: THREE.CanvasTexture | null = null;

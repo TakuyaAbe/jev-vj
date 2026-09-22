@@ -1,5 +1,5 @@
 import type { BarAggregator } from './features';
-import type { PaletteId, PhaseId, Scene, SceneId, TransitionId } from './types';
+import type { Effect, PaletteId, PhaseId, Scene, SceneId, TransitionId } from './types';
 
 export interface ChoiceAnswer<T extends string = string> {
   type: 'choice';
@@ -32,6 +32,8 @@ export interface JevAnswers {
   kime: NoulAnswer;
   /** speculative: if the drop lands within 8 bars, is that moment the 決め場 (only asked when a drop is plausible) */
   kime_on_drop?: NoulAnswer;
+  /** post-FX to layer on the stage: 'none' or an effect id (only asked when effects are in 'jev' mode) */
+  fx?: ChoiceAnswer<string>;
 }
 
 export interface JevResult {
@@ -105,6 +107,8 @@ export interface SetContext {
   lastPhase: PhaseId | null;
   lastSwitchReason: string | null;
   userContext: string;
+  /** current Jev-chosen post-FX ('none' when off); undefined when no effect is in 'jev' mode */
+  currentFx?: string;
 }
 
 /**
@@ -133,6 +137,8 @@ export const SCENE_SHORT: Partial<Record<SceneId, string>> = {
 };
 
 export const shortDescription = (sc: Scene): string => sc.short ?? SCENE_SHORT[sc.id] ?? sc.description.split('。')[0]!;
+
+export const shortFxDescription = (fx: Effect): string => fx.short ?? fx.description.split('。')[0]!;
 
 export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
   warm: '赤〜オレンジ〜琥珀の暖色。熱気、ピーク',
@@ -204,6 +210,7 @@ export function buildState(agg: BarAggregator, set: SetContext, scenes: Scene[],
       previous_scenes: set.previousScenes.slice(-4),
       last_phase_judgement: set.lastPhase ?? 'なし',
       last_switch_reason: set.lastSwitchReason ?? 'なし',
+      current_fx: set.currentFx,
       note:
         h.length < 16
           ? 'まだ小節数が少なく、相対値の基準（最大）が確定していない。今が曲の序盤である可能性を考慮する'
@@ -216,6 +223,8 @@ export function buildState(agg: BarAggregator, set: SetContext, scenes: Scene[],
 export interface QuestionOptions {
   /** include the speculative drop questions (drop_scene, kime_on_drop) */
   askDrop: boolean;
+  /** effects in 'jev' mode; the fx question is asked only when non-empty */
+  fx?: Effect[];
 }
 
 export function buildQuestions(scenes: Scene[], unit?: Unit, opts: QuestionOptions = { askDrop: true }): Record<string, unknown> {
@@ -288,6 +297,15 @@ export function buildQuestions(scenes: Scene[], unit?: Unit, opts: QuestionOptio
       instructions: 'シーンを切り替える場合の切り替え方',
       criteria: { cut: '瞬時。ドロップや明確な切れ目', crossfade: '1小節で溶かす。緩やかな変化', flash: '白く光って切替。ビルドの頂点' },
     },
+    ...(opts.fx && opts.fx.length > 0
+      ? {
+          fx: {
+            type: 'choice',
+            instructions: '次の数小節、映像全体に重ねるポストエフェクト（`set.current_fx` が現在）。静かな場面や迷うときは none。頻繁に変えない',
+            criteria: { none: 'エフェクトなし。素の映像。イントロ・ブレイク・平常時', ...Object.fromEntries(opts.fx.map((fx) => [fx.id, shortFxDescription(fx)])) },
+          },
+        }
+      : {}),
   };
 }
 

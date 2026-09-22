@@ -4,7 +4,7 @@ import { GlContext } from './context';
 import { AudioTextures, noiseTexture } from './audio-texture';
 import { copyTexture, FULLSCREEN_VERT, fullscreenCamera, fullscreenScene, makeTarget } from './fullscreen';
 import { makeAudioUniforms, updateAudioUniforms, type BeatCounter } from './uniforms';
-import { stripDirectives, type PluginMeta } from '../plugins/meta';
+import { SOURCE_END, sourceStart, stripDirectives, type PluginMeta } from '../plugins/meta';
 
 /**
  * Shadertoy-compatible single-pass shaders (`void mainImage(out vec4, in vec2)`).
@@ -15,12 +15,21 @@ import { stripDirectives, type PluginMeta } from '../plugins/meta';
  *   iChannel1  this shader's previous frame (feedback; stands in for a Buffer A loop)
  *   iChannel2  256x256 RGBA noise
  *   iChannel3  256x256 RGBA noise
+ *   iMouse     no pointer: xy follow the music (x = bar phase * width, y = bass * height),
+ *              z = w = 0 always, i.e. "button never pressed". Shaders that switch to an
+ *              automatic camera when iMouse.z <= 0 therefore take their auto path.
+ *   HW_PERFORMANCE  defined as 0 (Shadertoy's "low-end GPU" path), so `#if HW_PERFORMANCE==0`
+ *              picks the cheaper AA setting and the macro is never undefined.
+ * All iChannels are plain sampler2D, so texture(), textureLod(), texelFetch() and
+ * textureSize() work as in WebGL2 Shadertoy (texture2D() too, via three's #define).
+ * `#define`s, `const`s and helper functions ("Common" tab code) may precede mainImage.
  * The Jev uniforms (uBass, uBeatPulse, uIntensity, uColA… see common.glsl) are
  * declared too, so a shader pasted from Shadertoy works as-is and can then be
  * tied to the palette / beat by editing a line or two.
  * Multi-buffer shaders (Buffer A–D, Cube A) are not supported.
  */
 const HEADER = /* glsl */ `
+#define HW_PERFORMANCE 0
 uniform vec3 iResolution;
 uniform float iTime, iTimeDelta, iFrameRate, iSampleRate;
 uniform int iFrame;
@@ -82,7 +91,7 @@ export function makeShadertoyScene(src: string, opts: ShadertoyOptions): Scene {
     const mat = new THREE.ShaderMaterial({
       uniforms,
       vertexShader: FULLSCREEN_VERT,
-      fragmentShader: `${HEADER}\n${stripDirectives(src)}\n${FOOTER}`,
+      fragmentShader: `${HEADER}\n${sourceStart(opts.source)}\n${stripDirectives(src)}\n${SOURCE_END}\n${FOOTER}`,
       depthTest: false,
       depthWrite: false,
     });
@@ -125,7 +134,8 @@ export function makeShadertoyScene(src: string, opts: ShadertoyOptions): Scene {
       (u.iChannelTime!.value as number[])[0] = input.t;
       const d = new Date();
       (u.iDate!.value as THREE.Vector4).set(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000);
-      // "mouse" follows the beat so mouse-driven shaders still move: x = bar phase, y = bass
+      // "mouse" follows the beat so mouse-driven shaders still move: x = bar phase, y = bass;
+      // z/w stay 0 (never clicked) — see the header comment
       (u.iMouse!.value as THREE.Vector4).set(input.barPhase * gl.w, input.bass * gl.h, 0, 0);
       u.iChannel0!.value = AudioTextures.shadertoy;
       const r = gl.renderer;

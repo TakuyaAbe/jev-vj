@@ -18,4 +18,4 @@ export function requireSameOrigin(request: Request, url: URL): Response | null {
 }
 
 /** The question ids this app asks; anything else is not relayed. */
-export const ALLOWED_QUESTION_IDS = new Set(['phase', 'drop_soon', 'switch_now', 'scene', 'drop_scene', 'intensity', 'palette', 'transition', 'kime', 'kime_on_drop']);
+export const ALLOWED_QUESTION_IDS = new Set(['phase', 'drop_soon', 'switch_now', 'scene', 'drop_scene', 'intensity', 'palette', 'transition', 'kime', 'kime_on_drop', 'fx']);

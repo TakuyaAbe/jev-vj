@@ -29,7 +29,7 @@ mic / file / demo ──▶ AnalyserNode (50 Hz)
 API キーは Worker の secret にしかない。課金の走る `/api/jev` は 3 段で守る:
 
 1. **同一オリジンからの POST だけ**通す（`Sec-Fetch-Site` / `Origin` はブラウザが付ける値で、ページの JS からは偽装できない）。
-2. **質問 ID の許可リスト**（`phase`, `drop_soon`, `switch_now`, `scene`, `drop_scene`, `intensity`, `palette`, `transition`, `kime`, `kime_on_drop`）以外は中継しない。他用途の LLM 代理には使えない。
+2. **質問 ID の許可リスト**（`phase`, `drop_soon`, `switch_now`, `scene`, `drop_scene`, `intensity`, `palette`, `transition`, `kime`, `kime_on_drop`, `fx`）以外は中継しない。他用途の LLM 代理には使えない。
 3. **Rate Limiting バインディング**（`wrangler.jsonc` の `ratelimits`）: クライアント IP ごとに 90 回/分、サイト全体で 400 回/分。3 体合議は 1 審議 3 回なので通常運用は 20〜45 回/分。
    最悪ケース（全体上限に張り付き）でも 400 回/分 ≈ 2.2M tokens/分 ≈ $0.09/分。
 
@@ -77,6 +77,21 @@ npm run dev                    # http://localhost:5183
   NC / ND の曲は社外デモや公開時に差し替えること（AFM は BY-SA なので使いやすい）。
 - `?audio=<url>` で URL 再生ボタンを追加（Vite の `/@fs/` 経由でローカルファイルも可）。
 - `h` でパネル非表示、`f` で全画面。Mute はスピーカーだけ切って解析は続ける。
+
+## ビジュアルのプラグイン
+
+`src/plugins/` にシェーダーや TS ファイルを置くと、起動時に自動でシーン / FX として読み込まれる。実行中のドロップでも追加でき、追加したものはリロード後も残る。
+書き方は [src/plugins/README.md](src/plugins/README.md)。いま同梱しているもの:
+
+| 形式 | シーン | FX |
+| --- | --- | --- |
+| ISF（`isf/*.fs`） | 5 | 5 |
+| Shadertoy（`shadertoy/*.glsl`） | 5 | – |
+| Jev GLSL（`glsl/*.frag`） | 4 | – |
+| three.js（`three/*.scene.ts`） | 5 | – |
+| Canvas 2D（`canvas/*.scene.ts`） | 5 | 3 |
+
+FX はパネルで off / jev (AI) / auto / beat / on を選ぶ。jev (AI) にした FX からは Jev の合議が 1 つを選ぶ。
 
 ## MAGI: 3 体の Jev で合議する
 

@@ -17,8 +17,6 @@ export interface PluginMeta {
   short?: string;
   group?: string;
   maxBars?: number;
-  /** effects only: 'always' | 'auto' (default) */
-  mode?: string;
 }
 
 const TAG = /^\s*(?:\/\/+|\*|\/\*+)?\s*@(\w+)\s+(.+?)\s*(?:\*\/)?\s*$/;
@@ -31,7 +29,7 @@ export function parseCommentMeta(src: string): PluginMeta {
     if (!m) continue;
     const [, key, value] = m as unknown as [string, string, string];
     if (key === 'maxBars') meta.maxBars = Number(value) || undefined;
-    else if (key === 'name' || key === 'description' || key === 'short' || key === 'group' || key === 'id' || key === 'mode') meta[key] = value;
+    else if (key === 'name' || key === 'description' || key === 'short' || key === 'group' || key === 'id') meta[key] = value;
   }
   return meta;
 }
@@ -68,7 +66,23 @@ export function detectShaderFormat(src: string): ShaderFormat {
   return 'jev';
 }
 
-/** Remove directives three.js adds itself (it compiles as GLSL ES 3.00 with its own prefix). */
+/**
+ * Remove directives three.js adds itself (it compiles as GLSL ES 3.00 with its own prefix).
+ * Lines are blanked, never removed, so compiler line numbers still match the file.
+ */
 export function stripDirectives(src: string): string {
-  return src.replace(/^\s*#version.*$/gm, '').replace(/^\s*precision\s+\w+\s+\w+\s*;/gm, '');
+  return src.replace(/^[ \t]*#version.*$/gm, '').replace(/^[ \t]*precision\s+\w+\s+\w+\s*;/gm, '');
+}
+
+/**
+ * Source markers. Runtimes put `sourceStart()` on the line right before the
+ * user's code and `SOURCE_END` right after it; GlContext uses them to map
+ * compiler line numbers (which count three's prefix + our headers) back to the
+ * user's file. `offset` = lines of the file that precede the compiled body
+ * (e.g. an ISF JSON header).
+ */
+export const SOURCE_TAG = '// @jevj-src';
+export const SOURCE_END = '// @jevj-end';
+export function sourceStart(file: string, offset = 0): string {
+  return `${SOURCE_TAG} ${offset} ${baseName(file).replace(/[\r\n]/g, '')}`;
 }
