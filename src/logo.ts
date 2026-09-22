@@ -62,7 +62,8 @@ export class LogoOverlay {
     return Math.max(8, Math.min(max, (100 * maxW) / w100));
   }
 
-  draw(ctx: CanvasRenderingContext2D, w: number, h: number, now: number, input: RenderInput): void {
+  /** @param visibleW stage width not covered by the side panel; the logo centers and fits inside it */
+  draw(ctx: CanvasRenderingContext2D, w: number, h: number, now: number, input: RenderInput, visibleW = w): void {
     const IN = 420;
     const OUT = 380;
     let k: number; // 0..1 presence
@@ -72,10 +73,10 @@ export class LogoOverlay {
     if (k <= 0) return;
     const ease = k < 1 ? 1 - Math.pow(1 - k, 3) : 1;
 
-    const cx = w / 2;
+    const cx = visibleW / 2;
     const cy = h / 2;
-    const jpSize = this.fitSize(ctx, this.jp, this.jpFont(100), w * 0.86, h * 0.2);
-    const enSize = this.fitSize(ctx, this.en, this.enFont(100), w * 0.86, jpSize * 0.32, 0.32);
+    const jpSize = this.fitSize(ctx, this.jp, this.jpFont(100), visibleW * 0.86, h * 0.2);
+    const enSize = this.fitSize(ctx, this.en, this.enFont(100), visibleW * 0.86, jpSize * 0.32, 0.32);
     const bandH = jpSize * 2.6;
     const pulse = 1 + input.beatPulse * 0.035 * (0.5 + input.intensity);
 
@@ -89,12 +90,12 @@ export class LogoOverlay {
     ctx.globalAlpha = ease;
     ctx.fillStyle = input.palette.c;
     const ruleW = w * ease;
-    ctx.fillRect(cx - ruleW / 2, cy - bandH / 2, ruleW, Math.max(1, jpSize * 0.03));
-    ctx.fillRect(cx - ruleW / 2, cy + bandH / 2, ruleW, Math.max(1, jpSize * 0.03));
+    ctx.fillRect(w / 2 - ruleW / 2, cy - bandH / 2, ruleW, Math.max(1, jpSize * 0.03));
+    ctx.fillRect(w / 2 - ruleW / 2, cy + bandH / 2, ruleW, Math.max(1, jpSize * 0.03));
 
     // clip region reveals the text left → right while entering
     ctx.beginPath();
-    ctx.rect(cx - (w / 2) * ease, cy - bandH / 2, w * ease, bandH);
+    ctx.rect(cx - (visibleW / 2) * ease, cy - bandH / 2, visibleW * ease, bandH);
     ctx.clip();
 
     ctx.translate(cx, cy);

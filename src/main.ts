@@ -574,7 +574,9 @@ function frame(now: number): void {
     ? `${dots} bar ${lastBeat.bar} · ${lastBeat.bpm ? lastBeat.bpm.toFixed(0) : '---'}bpm ${bars5(f.rms)}${f.onset ? '◆' : ' '} · ${s.scene.id} int${s.intensity.toFixed(2)} ${s.paletteId} · ${s.lastPhase ?? '--'}${s.armed ? ` · armed→${s.armed.scene}` : ''}${s.logo.active ? ' · LOGO' : ''}${s.inFlight ? ' · MAGI…' : ''}`
     : '(no audio)';
   terminal.draw(renderer.overlayCtx, renderer.w, renderer.h, now, logo.active ? 0.35 : 1);
-  logo.draw(renderer.overlayCtx, renderer.w, renderer.h, now, lastInput);
+  const panelEl = document.getElementById('panel');
+  const panelPx = panelEl && !panelEl.classList.contains('hidden') ? panelEl.offsetWidth * (renderer.w / window.innerWidth) : 0;
+  logo.draw(renderer.overlayCtx, renderer.w, renderer.h, now, lastInput, renderer.w - panelPx);
   const hint = audio?.kind === 'demo' ? demoSectionAt(Math.floor(audio.position() / ((60 / DEMO_BPM) * 4))) : null;
   ui.updateLive(f, lastBeat, s, hint);
   if (audio?.playing && !isLive(audio.kind)) ui.setProgress(audio.position(), audio.duration);
