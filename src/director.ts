@@ -215,7 +215,7 @@ export class Director {
       lastPhase: null,
       intervalBars: 2,
       paused: false,
-      magiMode: 'always',
+      magiMode: 'changes',
       lastDropSoon: 0,
       fx: null,
       fxChangedAt: 0,

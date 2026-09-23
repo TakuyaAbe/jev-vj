@@ -29,7 +29,7 @@ const DEFAULTS: Settings = {
   autoAdvance: true,
   muted: false,
   intervalBars: 2,
-  magiMode: 'always',
+  magiMode: 'changes',
   overlay: true,
   logRows: 10,
   context: '',
