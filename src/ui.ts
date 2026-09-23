@@ -9,6 +9,8 @@ export interface TrackInfo {
   note?: string;
 }
 
+export type SourceMode = 'demo' | 'tracks' | 'file' | 'mic' | 'system' | 'url';
+
 /** off / on (full) / auto (follows Jev's intensity) / beat (pulses on the beat) */
 export type EffectMode = 'off' | 'on' | 'auto' | 'beat' | 'jev';
 
@@ -90,8 +92,19 @@ export class Ui {
   private readonly logEl: HTMLElement;
   private readonly statusEl: HTMLElement;
   private readonly pauseBtn: HTMLButtonElement;
-  private readonly sourceBtns: HTMLButtonElement[] = [];
   private readonly sourceRow: HTMLElement;
+  private readonly sourceBody: HTMLElement;
+  private readonly modeButtons = new Map<SourceMode, HTMLButtonElement>();
+  private readonly modeBodies = new Map<SourceMode, HTMLElement>();
+  private readonly playBtn: HTMLButtonElement;
+  private readonly fileName: HTMLElement;
+  private readonly seekRow: HTMLElement;
+  /** the source picked in the Source tabs */
+  private mode: SourceMode = 'demo';
+  /** what is actually running (null = stopped) */
+  private playing: SourceMode | null = null;
+  private pendingFile: File | null = null;
+  private urlPlay: (() => void) | null = null;
   private readonly deviceSelect: HTMLSelectElement;
   private readonly nowPlayingEl: HTMLElement;
   private readonly unitsEl: HTMLElement;
@@ -114,63 +127,112 @@ export class Ui {
     const sub = el('div', 'hint', 'DSP がビートを刻み、Jev が小節ごとに演出を判断する。h: パネル / f: 全画面');
     this.panel.append(title, sub);
 
-    // source
+    // source: where the audio comes from (selecting does not start playback)
     const src = el('section');
     src.append(el('h2', '', 'Source'));
-    const row = el('div', 'row');
-    const demoBtn = el('button', '', 'Demo track');
-    demoBtn.onclick = () => cb.playDemo();
+    this.sourceRow = el('div', 'seg');
+    const modes: [SourceMode, string][] = [
+      ['demo', 'Demo'],
+      ['tracks', 'Tracks'],
+      ['file', 'File'],
+      ['mic', 'Mic / line-in'],
+      ['system', 'System audio'],
+    ];
+    for (const [m, label] of modes) this.addModeButton(m, label);
+    this.sourceBody = el('div', 'source-body');
+
+    // demo
+    const demoBody = el('div', '', '');
+    demoBody.append(el('div', 'hint', '128 BPM のテクノを合成（intro → build → drop → breakdown → build → drop → outro、約 3 分）'));
+    this.modeBodies.set('demo', demoBody);
+
+    // tracks (bundled playlist)
+    const trBody = el('div');
+    const plRow = el('div', 'row');
+    this.trackSelect = el('select');
+    this.trackSelect.style.flex = '1';
+    this.trackSelect.style.minWidth = '0';
+    this.trackSelect.onchange = () => {
+      this.showTrackNote();
+      // while a track is playing, picking another one switches to it
+      if (this.playing === 'tracks') cb.playTrack(Number(this.trackSelect.value));
+    };
+    const prevBtn = el('button', '', '⏮');
+    prevBtn.title = '前の曲';
+    prevBtn.onclick = () => this.step(-1);
+    const nextBtn = el('button', '', '⏭');
+    nextBtn.title = '次の曲';
+    nextBtn.onclick = () => this.step(1);
+    plRow.append(this.trackSelect, prevBtn, nextBtn);
+    this.trackNote = el('div', 'hint', '');
+    const autoRow = el('label', 'row hint');
+    const auto = el('input');
+    auto.type = 'checkbox';
+    auto.checked = true;
+    auto.onchange = () => cb.setAutoAdvance(auto.checked);
+    autoRow.append(auto, document.createTextNode('曲が終わったら次へ'));
+    trBody.append(plRow, this.trackNote, autoRow, el('div', 'hint', 'public/tracks の CC 音源'));
+    this.modeBodies.set('tracks', trBody);
+
+    // file
+    const fileBody = el('div');
     const fileInput = el('input');
     fileInput.type = 'file';
     fileInput.accept = 'audio/*';
     fileInput.style.display = 'none';
     fileInput.onchange = () => {
       const f = fileInput.files?.[0];
-      if (f) cb.playFile(f);
       fileInput.value = '';
+      if (!f) return;
+      this.pendingFile = f;
+      this.fileName.textContent = f.name;
+      cb.playFile(f);
     };
-    const fileBtn = el('button', '', 'Audio file…');
+    const fileRow = el('div', 'row');
+    const fileBtn = el('button', '', '音声ファイルを選ぶ…');
     fileBtn.onclick = () => fileInput.click();
-    const micBtn = el('button', '', 'Mic / line-in');
-    micBtn.onclick = () => cb.startMic(this.deviceSelect.value || undefined);
-    const sysBtn = el('button', '', 'System audio');
-    sysBtn.title = '画面共有ダイアログで「システム音声を共有」を選ぶと、Spotify など Mac で鳴っている音をそのまま解析する';
-    sysBtn.onclick = () => cb.startSystemAudio();
-    const stopBtn = el('button', '', 'Stop');
-    stopBtn.onclick = () => cb.stop();
-    const muteBtn = el('button', '', 'Mute');
-    muteBtn.onclick = () => muteBtn.classList.toggle('on', cb.toggleMute());
-    this.sourceBtns.push(demoBtn, fileBtn, micBtn, sysBtn);
-    row.append(demoBtn, fileBtn, micBtn, sysBtn, stopBtn, muteBtn, fileInput);
-    this.sourceRow = row;
+    this.fileName = el('span', 'hint', '未選択（画面にドロップでも可）');
+    fileRow.append(fileBtn, this.fileName, fileInput);
+    fileBody.append(fileRow);
+    this.modeBodies.set('file', fileBody);
+
+    // mic / line-in
+    const micBody = el('div');
     const devRow = el('div', 'row');
     devRow.append(el('span', 'hint', 'input'));
     this.deviceSelect = el('select');
-    this.deviceSelect.style.maxWidth = '240px';
+    this.deviceSelect.style.flex = '1';
+    this.deviceSelect.style.minWidth = '0';
     const none = el('option', '', 'default');
     none.value = '';
     this.deviceSelect.append(none);
     devRow.append(this.deviceSelect);
-    this.statusEl = el('div', 'hint', 'stopped');
+    micBody.append(devRow, el('div', 'hint', 'DJ ミキサーの出力など。スピーカーには出さない（解析のみ）'));
+    this.modeBodies.set('mic', micBody);
+
+    // system audio
+    const sysBody = el('div');
     this.nowPlayingEl = el('div', 'hint', '');
-    src.append(row, devRow, this.statusEl, this.nowPlayingEl);
+    sysBody.append(
+      el('div', 'hint', '▶ で画面共有ダイアログが開く。「システム音声を共有」を選ぶと Spotify など Mac で鳴っている音をそのまま解析する'),
+      this.nowPlayingEl,
+    );
+    this.modeBodies.set('system', sysBody);
+
+    src.append(this.sourceRow, this.sourceBody);
     this.panel.append(src);
 
-    // playlist
-    const pl = el('section');
-    pl.append(el('h2', '', 'Tracks (CC, public/tracks)'));
-    const plRow = el('div', 'row');
-    this.trackSelect = el('select');
-    this.trackSelect.style.maxWidth = '200px';
-    this.trackSelect.onchange = () => this.showTrackNote();
-    const playBtn = el('button', '', '▶ Play');
-    playBtn.onclick = () => cb.playTrack(Number(this.trackSelect.value));
-    const prevBtn = el('button', '', '⏮');
-    prevBtn.onclick = () => this.step(-1);
-    const nextBtn = el('button', '', '⏭');
-    nextBtn.onclick = () => this.step(1);
-    plRow.append(this.trackSelect, playBtn, prevBtn, nextBtn);
-    this.trackNote = el('div', 'hint', '');
+    // transport: the same controls whatever the source is
+    const tr = el('section');
+    tr.append(el('h2', '', 'Transport'));
+    const trRow = el('div', 'row');
+    this.playBtn = el('button', 'play', '▶ Play');
+    this.playBtn.onclick = () => this.togglePlay();
+    const muteBtn = el('button', '', 'Mute');
+    muteBtn.title = 'スピーカーだけ切って解析は続ける';
+    muteBtn.onclick = () => muteBtn.classList.toggle('on', cb.toggleMute());
+    this.statusEl = el('span', 'hint status', 'stopped');
+    trRow.append(this.playBtn, muteBtn, this.statusEl);
     const seekRow = el('div', 'row');
     this.progress = el('input');
     this.progress.type = 'range';
@@ -187,14 +249,10 @@ export class Ui {
     };
     this.timeEl = el('span', 'hint', '0:00 / 0:00');
     seekRow.append(this.progress, this.timeEl);
-    const autoRow = el('label', 'row hint');
-    const auto = el('input');
-    auto.type = 'checkbox';
-    auto.checked = true;
-    auto.onchange = () => cb.setAutoAdvance(auto.checked);
-    autoRow.append(auto, document.createTextNode('曲が終わったら次へ'));
-    pl.append(plRow, this.trackNote, seekRow, autoRow);
-    this.panel.append(pl);
+    this.seekRow = seekRow;
+    tr.append(trRow, seekRow);
+    this.panel.append(tr);
+    this.selectMode('demo');
 
     // context + interval
     const ctxSec = el('section');
@@ -638,16 +696,74 @@ export class Ui {
     this.timeEl.textContent = `${f(posSec)} / ${f(durationSec)}`;
   }
 
-  addSourceButton(label: string, onClick: () => void): void {
+  private addModeButton(m: SourceMode, label: string): void {
     const b = el('button', '', label);
-    b.onclick = onClick;
-    this.sourceRow.insertBefore(b, this.sourceRow.children[3] ?? null);
+    b.onclick = () => this.selectMode(m);
+    this.sourceRow.append(b);
+    this.modeButtons.set(m, b);
   }
 
-  setStatus(text: string, active: 'demo' | 'file' | 'mic' | null): void {
+  /** Pick a source. Does not interrupt what is playing; ▶ starts the picked one. */
+  selectMode(m: SourceMode): void {
+    this.mode = m;
+    for (const [k, b] of this.modeButtons) b.classList.toggle('on', k === m);
+    this.sourceBody.replaceChildren(this.modeBodies.get(m) ?? el('div'));
+    this.refreshTransport();
+  }
+
+  /** ■ stops the running source; ▶ starts the picked one (replacing whatever else is running). */
+  private togglePlay(): void {
+    if (this.playing && this.playing === this.mode) {
+      this.cb.stop();
+      return;
+    }
+    switch (this.mode) {
+      case 'demo':
+        this.cb.playDemo();
+        break;
+      case 'tracks':
+        if (this.tracks.length) this.cb.playTrack(Number(this.trackSelect.value) || 0);
+        break;
+      case 'file':
+        if (this.pendingFile) this.cb.playFile(this.pendingFile);
+        else (this.modeBodies.get('file')?.querySelector('input[type=file]') as HTMLInputElement | null)?.click();
+        break;
+      case 'mic':
+        this.cb.startMic(this.deviceSelect.value || undefined);
+        break;
+      case 'system':
+        this.cb.startSystemAudio();
+        break;
+      case 'url':
+        this.urlPlay?.();
+        break;
+    }
+  }
+
+  private refreshTransport(): void {
+    const stoppable = this.playing !== null && this.playing === this.mode;
+    this.playBtn.textContent = stoppable ? '■ Stop' : this.playing ? '▶ Play (切替)' : '▶ Play';
+    this.playBtn.classList.toggle('on', stoppable);
+    // live inputs have no timeline
+    const live = (this.playing ?? this.mode) === 'mic' || (this.playing ?? this.mode) === 'system';
+    this.seekRow.style.display = live ? 'none' : '';
+  }
+
+  /** ?audio=<url>: an extra source tab */
+  addSourceButton(label: string, onClick: () => void): void {
+    this.urlPlay = onClick;
+    const body = el('div');
+    body.append(el('div', 'hint', label));
+    this.modeBodies.set('url', body);
+    this.addModeButton('url', 'URL');
+  }
+
+  /** `active` = the source now running (null = stopped); the Source tabs follow it. */
+  setStatus(text: string, active: SourceMode | null): void {
     this.statusEl.textContent = text;
-    const idx = active === 'demo' ? 0 : active === 'file' ? 1 : active === 'mic' ? 2 : -1;
-    this.sourceBtns.forEach((b, i) => b.classList.toggle('on', i === idx));
+    this.playing = active;
+    if (active && active !== this.mode) this.selectMode(active);
+    else this.refreshTransport();
   }
 
   updateLive(f: FrameFeatures | null, beat: BeatInfo, d: DirectorState, sectionHint: string | null): void {

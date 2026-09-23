@@ -94,3 +94,12 @@ textarea {
 body.dropping::after { content: 'ドロップしてシェーダー / プラグイン / 音源を追加'; position: fixed; inset: 16px; border: 2px dashed var(--acc); border-radius: 8px; display: grid; place-items: center; color: var(--acc); font-size: 18px; background: rgba(0, 0, 0, 0.5); pointer-events: none; z-index: 10; }
 pre.json { font-size: 10px; line-height: 1.35; max-height: 260px; overflow: auto; background: #0c0c14; border: 1px solid var(--line); border-radius: 4px; padding: 6px; margin: 2px 0 6px; white-space: pre-wrap; word-break: break-all; }
 details > summary { cursor: pointer; }
+
+.seg { display: flex; flex-wrap: wrap; gap: 0; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 4px 4px 0; }
+.source-body { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; min-height: 28px; }
+.source-body > div { display: flex; flex-direction: column; gap: 4px; }
+button.play { min-width: 76px; font-weight: 600; }
+.status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

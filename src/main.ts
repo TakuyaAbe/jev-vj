@@ -9,7 +9,7 @@ import { BarAggregator } from './features';
 import { Renderer } from './render';
 import { EFFECTS, onRegistryChange, prewarm, registerEffects, registerScenes, resetSceneState, SCENES, unregister } from './scenes';
 import { exposeGlobalApi, fromFile, MODULE_EXT, SHADER_EXT, type Loaded } from './plugins/loader';
-import { GROUP_LABELS, Ui, type EffectMode, type TrackInfo, type UiCallbacks } from './ui';
+import { GROUP_LABELS, Ui, type EffectMode, type SourceMode, type TrackInfo, type UiCallbacks } from './ui';
 import type { BeatInfo, Effect, RenderInput } from './types';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
@@ -302,7 +302,7 @@ const cbs: UiCallbacks = {
     try {
       await a.startSystemAudio();
       resetAll();
-      ui.setStatus('system audio via screen share (not monitored)', 'mic');
+      ui.setStatus('system audio via screen share (not monitored)', 'system');
     } catch (e) {
       ui.setStatus(`system audio failed: ${e instanceof Error ? e.message : String(e)}`, null);
     }
@@ -585,8 +585,11 @@ async function pollSpotify(): Promise<void> {
     /* dev server not reachable */
   }
 }
-void pollSpotify();
-spotifyTimer = window.setInterval(() => void pollSpotify(), 2000);
+// AppleScript reads the Spotify app on the machine running the dev server, so this only means anything on localhost
+if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  void pollSpotify();
+  spotifyTimer = window.setInterval(() => void pollSpotify(), 2000);
+}
 // input devices are listed after the first Mic / line-in grant (enumerating earlier triggers a permission notice)
 
 // decoded buffers are cached so restarts, seeks and the next track start without a fetch/decode gap
@@ -611,14 +614,14 @@ function prefetchNext(): void {
   if (next) void getBuffer(`/tracks/${next.file}`).catch(() => undefined);
 }
 
-async function playUrl(url: string, label: string, offset = 0): Promise<void> {
+async function playUrl(url: string, label: string, offset = 0, kind: SourceMode = 'tracks'): Promise<void> {
   const a = ensureAudio();
-  if (!bufferCache.has(url)) ui.setStatus(`fetching ${label}…`, 'file');
+  if (!bufferCache.has(url)) ui.setStatus(`fetching ${label}…`, kind);
   try {
     const buf = await getBuffer(url);
     resetAll();
     await a.playBuffer(buf, 'file', offset);
-    ui.setStatus(`${label} (${Math.round(buf.duration)} s)`, 'file');
+    ui.setStatus(`${label} (${Math.round(buf.duration)} s)`, kind);
     logInfo(`▶ ${label}${offset > 0 ? ` @ ${Math.round(offset)}s` : ''} (${Math.round(buf.duration)} s)`);
     prefetchNext();
   } catch (e) {
@@ -669,7 +672,9 @@ async function resumePlayback(): Promise<void> {
     await start();
     return;
   }
-  ui.setStatus(`クリックで再開: ${t.label} @ ${Math.round(target())}s`, 'file');
+  ui.selectMode('tracks');
+  ui.selectTrack(saved.track);
+  ui.setStatus(`クリックで再開: ${t.label} @ ${Math.round(target())}s`, null);
   const once = (): void => {
     window.removeEventListener('pointerdown', once);
     window.removeEventListener('keydown', once);
@@ -682,7 +687,7 @@ async function resumePlayback(): Promise<void> {
 
 // ?audio=<url> adds a "Play URL" button (handy for testing with a real track)
 const audioUrl = new URLSearchParams(location.search).get('audio');
-if (audioUrl) ui.addSourceButton('Play URL', () => void playUrl(audioUrl, audioUrl.split('/').pop() ?? audioUrl));
+if (audioUrl) ui.addSourceButton(audioUrl, () => void playUrl(audioUrl, audioUrl.split('/').pop() ?? audioUrl, 0, 'url'));
 
 async function playTrack(index: number): Promise<void> {
   const t = tracks[index];
