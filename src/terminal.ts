@@ -90,7 +90,7 @@ export class TerminalOverlay {
     const blink = Math.floor(now / 530) % 2 === 0;
     ctx.globalAlpha = 0.55 * dim;
     ctx.fillStyle = '#9fffc8';
-    ctx.fillText(`magi@bakurocho:~$ ${this.status}${blink ? ' █' : '  '}`, left, bottom);
+    ctx.fillText(`jev@sayu_nomu_:~$ ${this.status}${blink ? ' █' : '  '}`, left, bottom);
     ctx.restore();
   }
 
