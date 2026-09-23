@@ -344,7 +344,7 @@ const cbs: UiCallbacks = {
   setScenePreset(kind) {
     const set = director.enabledScenes;
     set.clear();
-    if (kind !== 'all') for (const sc of SCENES) if (sc.group === kind) set.add(sc.id);
+    if (kind !== 'all') for (const sc of SCENES) if (sc.group === kind || (kind === 'nenju' && sc.month)) set.add(sc.id);
     ui.setEnabledScenes(set);
     ui.log({ t: performance.now(), kind: 'info', text: `素材セット: ${kind === 'all' ? 'すべて' : (GROUP_LABELS[kind] ?? kind)}（${director.candidates().length} scenes）` });
   },

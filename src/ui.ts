@@ -19,6 +19,7 @@ export const GROUP_LABELS: Record<string, string> = {
   isf: 'ISF',
   shadertoy: 'Shadertoy',
   user: '追加',
+  nenju: '年中行事',
 };
 
 export interface UiCallbacks {
@@ -453,6 +454,8 @@ export class Ui {
   setScenes(scenes: Scene[]): void {
     this.presetRow.replaceChildren();
     const groups = [...new Set(scenes.map((sc) => sc.group))];
+    // 年中行事 is a cross-group preset: every scene tagged with a month (ひな壇 3D included)
+    if (scenes.some((sc) => sc.month) && !groups.includes('nenju')) groups.push('nenju');
     for (const kind of ['all', ...groups]) {
       const b = el('button', '', kind === 'all' ? 'すべて' : (GROUP_LABELS[kind] ?? kind));
       b.onclick = () => this.cb.setScenePreset(kind);

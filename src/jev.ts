@@ -205,6 +205,8 @@ export function buildState(agg: BarAggregator, set: SetContext, scenes: Scene[],
     recent_bars: barLines,
     set: {
       elapsed: `${mm}分${ss.toString().padStart(2, '0')}秒`,
+      // only when 年中行事 scenes are candidates: lets Jev favour this month's event
+      month: scenes.some((sc) => sc.month) ? `${new Date().getMonth() + 1}月（年中行事のシーンは今月の行事が季節に合う。他の月も演出として使ってよい）` : undefined,
       current_scene: set.currentScene,
       scene_age_bars: set.sceneAgeBars,
       previous_scenes: set.previousScenes.slice(-4),

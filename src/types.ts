@@ -103,6 +103,8 @@ export interface Scene {
   group: SceneGroup;
   /** ~30-character criterion sent to Jev instead of the full description */
   short?: string;
+  /** 年中行事 scenes: the month (1..12) the event belongs to; they also form the 'nenju' preset */
+  month?: number;
   /** where it came from: bundled plugin file path or dropped file name (built-ins leave it unset) */
   source?: string;
   /** set when the scene failed to compile; the director skips it */

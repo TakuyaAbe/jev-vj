@@ -22,6 +22,8 @@ export interface SceneMeta {
   short?: string;
   group?: string;
   maxBars?: number;
+  /** 年中行事: month 1..12 */
+  month?: number;
 }
 
 /** Plain Canvas 2D. `render` draws the whole frame onto the stage context. */
@@ -65,6 +67,7 @@ export function defineThreeScene(def: SceneMeta & { fov?: number; setup(s: Three
     description: def.description,
     short: def.short,
     maxBars: def.maxBars,
+    month: def.month,
     group: def.group ?? 'gl',
     prepare() {
       const st = ensure();
