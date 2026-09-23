@@ -110,3 +110,30 @@ button.play { min-width: 76px; font-weight: 600; }
 .scene-item.drop-before { box-shadow: -3px 0 0 var(--acc); }
 .scene-item.drop-after { box-shadow: 3px 0 0 var(--acc); }
 input.num { width: 52px; font: inherit; background: #101018; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
+
+/* floating panel / fullscreen toggles (the only way to hide the panel on touch devices) */
+#fab {
+  position: fixed; z-index: 10; display: flex; gap: 6px;
+  top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right));
+}
+#fab button {
+  width: 34px; height: 34px; padding: 0; font-size: 16px; line-height: 1;
+  background: rgba(12, 12, 18, 0.7); backdrop-filter: blur(6px);
+}
+
+/* phones: the panel becomes a bottom sheet so the stage stays visible above it */
+@media (max-width: 700px) {
+  #panel {
+    top: auto; left: 0; width: auto; height: 42dvh;
+    background: rgba(12, 12, 18, 0.62); backdrop-filter: blur(3px);
+    border-left: 0; border-top: 1px solid var(--line); border-radius: 10px 10px 0 0;
+    padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+  }
+  #fab button { width: 42px; height: 42px; font-size: 18px; }
+  button { padding: 8px 11px; }
+  select { padding: 7px 8px; max-width: 100%; }
+  /* 16px keeps iOS Safari from zooming in on focus */
+  textarea, select, input { font-size: 16px; }
+  #log { max-height: none; }
+}

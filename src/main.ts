@@ -813,9 +813,15 @@ function frame(now: number): void {
     ? `${dots} bar ${lastBeat.bar} · ${lastBeat.bpm ? lastBeat.bpm.toFixed(0) : '---'}bpm ${bars5(f.rms)}${f.onset ? '◆' : ' '} · ${s.scene.id} int${s.intensity.toFixed(2)} ${s.paletteId} · ${s.lastPhase ?? '--'}${s.armed ? ` · armed→${s.armed.scene}` : ''}${s.fx ? ` · fx:${s.fx}` : now - s.fxChangedAt < 4000 && s.fxChangedAt > 0 ? ' · fx:none' : ''}${s.logo.active ? ' · LOGO' : ''}${s.inFlight ? ' · MAGI…' : ''}`
     : '(no audio)';
   terminal.draw(renderer.overlayCtx, renderer.w, renderer.h, now, logo.active ? 0.35 : 1);
+  // shrink the logo's area to what the panel leaves uncovered: its left edge (side panel) or top edge (phone bottom sheet)
   const panelEl = document.getElementById('panel');
-  const panelPx = panelEl && !panelEl.classList.contains('hidden') ? panelEl.offsetWidth * (renderer.w / window.innerWidth) : 0;
-  logo.draw(renderer.overlayCtx, renderer.w, renderer.h, now, lastInput, renderer.w - panelPx);
+  const r = panelEl && !panelEl.classList.contains('hidden') ? panelEl.getBoundingClientRect() : null;
+  const sx = renderer.w / window.innerWidth;
+  const sy = renderer.h / window.innerHeight;
+  const sheet = r !== null && r.left <= 0;
+  const visW = r && !sheet ? r.left * sx : renderer.w;
+  const visH = r && sheet ? r.top * sy : renderer.h;
+  logo.draw(renderer.overlayCtx, renderer.w, renderer.h, now, lastInput, visW, visH);
   const hint = audio?.kind === 'demo' ? demoSectionAt(Math.floor(audio.position() / ((60 / DEMO_BPM) * 4))) : null;
   ui.updateLive(f, lastBeat, s, hint);
   if (audio?.playing && !isLive(audio.kind)) ui.setProgress(audio.position(), audio.duration);

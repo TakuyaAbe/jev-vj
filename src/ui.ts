@@ -547,15 +547,44 @@ export class Ui {
     logSec.append(this.logEl);
     this.panel.append(logSec);
 
+    // floating controls so touch devices (no h / f keys) can still hide the panel and go fullscreen
+    const fab = el('div');
+    fab.id = 'fab';
+    const panelBtn = el('button');
+    panelBtn.title = 'パネル表示切替 (h)';
+    const syncPanelBtn = (): void => {
+      const open = !this.panel.classList.contains('hidden');
+      panelBtn.textContent = open ? '×' : '☰';
+      panelBtn.setAttribute('aria-label', open ? 'パネルを隠す' : 'パネルを表示');
+    };
+    const togglePanel = (): void => {
+      this.panel.classList.toggle('hidden');
+      syncPanelBtn();
+    };
+    panelBtn.onclick = togglePanel;
+    // phones open on the stage; the panel is one tap away
+    if (window.matchMedia('(max-width: 700px)').matches) this.panel.classList.add('hidden');
+    syncPanelBtn();
+    const toggleFullscreen = (): void => {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      else void document.documentElement.requestFullscreen?.();
+    };
+    fab.append(panelBtn);
+    if (document.fullscreenEnabled) {
+      const fsBtn = el('button', '', '⛶');
+      fsBtn.title = '全画面 (f)';
+      fsBtn.setAttribute('aria-label', '全画面');
+      fsBtn.onclick = toggleFullscreen;
+      fab.prepend(fsBtn);
+    }
+    document.body.append(fab);
+
     window.addEventListener('keydown', (e) => {
       const t = e.target;
       if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
       if (t instanceof HTMLInputElement && ['text', 'number', 'search', 'url'].includes(t.type)) return;
-      if (e.key === 'h') this.panel.classList.toggle('hidden');
-      if (e.key === 'f') {
-        if (document.fullscreenElement) void document.exitFullscreen();
-        else void document.documentElement.requestFullscreen();
-      }
+      if (e.key === 'h') togglePanel();
+      if (e.key === 'f') toggleFullscreen();
     });
   }
 
