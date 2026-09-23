@@ -45,7 +45,7 @@ export interface JevResult {
   state: unknown;
 }
 
-export type UnitId = 'melchior' | 'balthasar' | 'casper';
+export type UnitId = 'melchior' | 'balthasar' | 'casper' | 'solo';
 
 /** One of the three MAGI judges: the same Jev model, a different stance. */
 export interface Unit {
@@ -95,7 +95,18 @@ export const UNITS: Unit[] = [
   },
 ];
 
-export const UNIT_BY_ID: Record<UnitId, Unit> = Object.fromEntries(UNITS.map((u) => [u.id, u])) as Record<UnitId, Unit>;
+/** Jev on its own (no council): a neutral VJ with no conservative or dramatic lean. */
+export const SOLO: Unit = {
+  id: 'solo',
+  name: 'JEV',
+  number: 1,
+  role: 'VJ',
+  stance: 'VJ として判断する。今の音に最も映える映像を選び、展開の変化や飽きを感じたら積極的に切り替える',
+  sceneHint: '今の音と展開に最も映えるものを選ぶ',
+  switchHint: '今のシーンより映える選択があるなら true',
+};
+
+export const UNIT_BY_ID: Record<UnitId, Unit> = Object.fromEntries([...UNITS, SOLO].map((u) => [u.id, u])) as Record<UnitId, Unit>;
 
 export interface SetContext {
   elapsedSec: number;
@@ -139,6 +150,14 @@ export const SCENE_SHORT: Partial<Record<SceneId, string>> = {
 export const shortDescription = (sc: Scene): string => sc.short ?? SCENE_SHORT[sc.id] ?? sc.description.split('。')[0]!;
 
 export const shortFxDescription = (fx: Effect): string => fx.short ?? fx.description.split('。')[0]!;
+
+/** closing sentence of the switch_now question per aggressiveness setting */
+const SWITCH_TONE: Record<'calm' | 'normal' | 'eager' | 'max', string> = {
+  calm: '頻繁な切替は避け、流れを大切にする',
+  normal: '頻繁すぎる切替は避ける',
+  eager: '映像の変化もショーの一部。迷ったら切り替えてよい',
+  max: '映像は常に動き続けるべき。少しでも他のシーンが映えそうなら切り替える',
+};
 
 export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
   warm: '赤〜オレンジ〜琥珀の暖色。熱気、ピーク',
@@ -227,6 +246,10 @@ export interface QuestionOptions {
   askDrop: boolean;
   /** effects in 'jev' mode; the fx question is asked only when non-empty */
   fx?: Effect[];
+  /** switching aggressiveness: shapes the switch_now wording */
+  eagerness?: 'calm' | 'normal' | 'eager' | 'max';
+  /** bars after which a change of scene is natural */
+  softAge?: number;
 }
 
 export function buildQuestions(scenes: Scene[], unit?: Unit, opts: QuestionOptions = { askDrop: true }): Record<string, unknown> {
@@ -253,7 +276,7 @@ export function buildQuestions(scenes: Scene[], unit?: Unit, opts: QuestionOptio
     },
     switch_now: {
       type: 'noul',
-      instructions: `${judgeSwitch}今、映像シーンを \`set.current_scene\` から切り替えるべきか。展開が変わった直後や同じシーンが16小節以上続くときは自然。頻繁すぎる切替は避ける`,
+      instructions: `${judgeSwitch}今、映像シーンを \`set.current_scene\` から切り替えるべきか。展開が変わった直後や同じシーンが${opts.softAge ?? 16}小節以上続くときは自然。${SWITCH_TONE[opts.eagerness ?? 'normal']}`,
       criteria: { true: '切り替える。展開が変わった／今の音に合っていない', false: '維持する。今の音に合っている' },
     },
     scene: {

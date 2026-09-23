@@ -316,6 +316,10 @@ const cbs: UiCallbacks = {
     director.state.magiMode = mode;
     saveSettings({ magiMode: mode });
   },
+  setEagerness(e) {
+    director.eagerness = e;
+    saveSettings({ eagerness: e });
+  },
   setOverlay(on) {
     terminal.enabled = on;
     saveSettings({ overlay: on });
@@ -453,6 +457,7 @@ const ui = new Ui(cbs);
 // remembered panel settings (the controls already show them)
 director.state.intervalBars = settings.intervalBars;
 director.state.magiMode = settings.magiMode;
+director.eagerness = settings.eagerness;
 terminal.enabled = settings.overlay;
 terminal.maxRows = settings.logRows;
 autoAdvance = settings.autoAdvance;

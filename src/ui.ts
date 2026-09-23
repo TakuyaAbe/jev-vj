@@ -39,6 +39,7 @@ export interface UiCallbacks {
   startSystemAudio(): void;
   stop(): void;
   setMagiMode(mode: 'always' | 'changes' | 'single'): void;
+  setEagerness(e: 'calm' | 'normal' | 'eager' | 'max'): void;
   setOverlay(on: boolean): void;
   setLogRows(rows: number): void;
   logoNow(): void;
@@ -296,9 +297,9 @@ export class Ui {
     const magiLabel = el('label', 'row hint');
     const magiSel = el('select');
     for (const [v, t] of [
-      ['always', 'MAGI 常時 3 体'],
-      ['changes', '変化時のみ 3 体（定期は 1 体）'],
-      ['single', '1 体だけ'],
+      ['single', 'Jev 単体（合議なし）'],
+      ['changes', '変化時のみ MAGI 3 体合議'],
+      ['always', 'MAGI 常時 3 体合議'],
     ] as const) {
       const o = el('option', '', t);
       o.value = v;
@@ -306,7 +307,21 @@ export class Ui {
     }
     magiSel.value = settings.magiMode;
     magiSel.onchange = () => cb.setMagiMode(magiSel.value as 'always' | 'changes' | 'single');
-    magiLabel.append(magiSel);
+    const eagerSel = el('select');
+    for (const [v, t] of [
+      ['calm', '切替: 控えめ'],
+      ['normal', '切替: 標準'],
+      ['eager', '切替: 積極的'],
+      ['max', '切替: 最大'],
+    ] as const) {
+      const o = el('option', '', t);
+      o.value = v;
+      eagerSel.append(o);
+    }
+    eagerSel.value = settings.eagerness;
+    eagerSel.title = 'Jev の切替提案をどれだけ通すか（閾値・シーンの最長小節数・審議の省略）';
+    eagerSel.onchange = () => cb.setEagerness(eagerSel.value as 'calm' | 'normal' | 'eager' | 'max');
+    magiLabel.append(magiSel, eagerSel);
     const ovLabel = el('label', 'row hint');
     const ovCb = el('input');
     ovCb.type = 'checkbox';

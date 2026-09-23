@@ -10,6 +10,8 @@ export interface Settings {
   muted: boolean;
   intervalBars: number;
   magiMode: 'always' | 'changes' | 'single';
+  /** how readily Jev's scene proposals are carried out */
+  eagerness: 'calm' | 'normal' | 'eager' | 'max';
   overlay: boolean;
   /** rows in the CLI log overlay */
   logRows: number;
@@ -29,7 +31,8 @@ const DEFAULTS: Settings = {
   autoAdvance: true,
   muted: false,
   intervalBars: 2,
-  magiMode: 'changes',
+  magiMode: 'single',
+  eagerness: 'eager',
   overlay: true,
   logRows: 10,
   context: '',

@@ -1,7 +1,33 @@
 import type { BarAggregator, Jump } from './features';
-import { buildQuestions, buildState, callJev, UNITS, type JevAnswers, type JevResult, type SetContext, type Unit, type UnitId } from './jev';
+import { buildQuestions, buildState, callJev, SOLO, UNITS, type JevAnswers, type JevResult, type SetContext, type Unit, type UnitId } from './jev';
 import { EFFECTS, PALETTES, SCENES, sceneById } from './scenes';
 import type { Effect, Palette, PaletteId, PhaseId, Scene, SceneId, TransitionId } from './types';
+
+/** How readily the council's scene proposals are carried out. */
+export type Eagerness = 'calm' | 'normal' | 'eager' | 'max';
+
+interface SwitchPolicy {
+  /** consensus switch_now needed to switch */
+  threshold: number;
+  /** after this many bars on one scene a weaker switch_now is enough … */
+  softAge: number;
+  softThreshold: number;
+  /** … and after this many the scene is replaced regardless (per-scene maxBars can be lower) */
+  maxAge: number;
+  /** scene-choice probability that carries a switch on its own */
+  sceneProb: number;
+  /** fraction of judges proposing a switch that carries it */
+  voteFrac: number;
+  /** settled drop/steady sections are asked half as often */
+  slowWhenSettled: boolean;
+}
+
+export const SWITCH_POLICIES: Record<Eagerness, SwitchPolicy> = {
+  calm: { threshold: 0.55, softAge: 16, softThreshold: 0.35, maxAge: 32, sceneProb: 0.75, voteFrac: 0.51, slowWhenSettled: true },
+  normal: { threshold: 0.5, softAge: 16, softThreshold: 0.3, maxAge: 32, sceneProb: 0.7, voteFrac: 0.51, slowWhenSettled: true },
+  eager: { threshold: 0.4, softAge: 8, softThreshold: 0.2, maxAge: 16, sceneProb: 0.55, voteFrac: 0.33, slowWhenSettled: false },
+  max: { threshold: 0.3, softAge: 4, softThreshold: 0.1, maxAge: 8, sceneProb: 0.45, voteFrac: 0.01, slowWhenSettled: false },
+};
 
 export type DecisionReason = 'interval' | 'change:drop' | 'change:cut' | 'manual' | 'start';
 
@@ -44,7 +70,7 @@ export interface Deliberation {
 
 export interface DirectorState {
   scene: Scene;
-  transition: { to: Scene; kind: TransitionId; progress: number } | null;
+  transition: { to: Scene; kind: TransitionId; progress: number; startedAt: number } | null;
   intensity: number;
   palette: Palette;
   paletteId: PaletteId;
@@ -184,6 +210,11 @@ export class Director {
   readonly enabledScenes = new Set<SceneId>();
   /** effect ids in 'jev' mode: the pool the council picks post-FX from (empty = the fx question is not asked) */
   readonly fxPool = new Set<string>();
+  /** switching aggressiveness (panel setting) */
+  eagerness: Eagerness = 'eager';
+  private get policy(): SwitchPolicy {
+    return SWITCH_POLICIES[this.eagerness];
+  }
   userContext = '';
   onLog: ((e: LogEntry) => void) | null = null;
   onDecision: ((r: JevResult, reason: DecisionReason) => void) | null = null;
@@ -215,7 +246,7 @@ export class Director {
       lastPhase: null,
       intervalBars: 2,
       paused: false,
-      magiMode: 'changes',
+      magiMode: 'single',
       lastDropSoon: 0,
       fx: null,
       fxChangedAt: 0,
@@ -259,7 +290,8 @@ export class Director {
     const prev = this.lastAsked;
     if (!now || !prev) return null;
     if (s.armed) return null;
-    if (bar - this.sceneStartBar >= 16) return null;
+    // once a scene has run its soft age, always ask (the council may want a change for its own sake)
+    if (bar - this.sceneStartBar >= this.policy.softAge) return null;
     const d = (a: number, b: number): number => Math.abs(a - b);
     const maxDiff = Math.max(d(now.e, prev.e), d(now.sub, prev.sub), d(now.bf, prev.bf), d(now.mid, prev.mid), d(now.high, prev.high));
     if (maxDiff >= 0.05 || d(now.onsets, prev.onsets) > 2) return null;
@@ -328,9 +360,25 @@ export class Director {
     this.onLogo?.(false);
   }
 
+  /**
+   * Crossfades run on wall-clock time (one bar), not on frame count: a hidden or
+   * throttled tab stops requestAnimationFrame, and a fade that never finishes would
+   * block every later switch as 「切替中」. Called per frame and per bar.
+   */
+  private advanceTransition(): void {
+    const s = this.state;
+    if (!s.transition) return;
+    s.transition.progress = (performance.now() - s.transition.startedAt) / 1000 / this.barDuration;
+    if (s.transition.progress >= 1) {
+      s.scene = s.transition.to;
+      s.transition = null;
+    }
+  }
+
   /** Called once per bar from the beat tracker. */
   onBar(bar: number, elapsedSec: number): void {
     const s = this.state;
+    this.advanceTransition();
     if (s.armed && bar > s.armed.untilBar) {
       this.log('info', `armed ${s.armed.scene} expired (no drop within 12 bars)`);
       s.armed = null;
@@ -395,7 +443,8 @@ export class Director {
     const fxCands = this.fxCandidates();
     if (fxCands.length > 0) set.currentFx = s.fx ?? 'none';
     const triggered = reason !== 'interval';
-    const units: Unit[] = s.magiMode === 'always' || (s.magiMode === 'changes' && (triggered || s.armed !== null)) ? UNITS : [UNITS[0]!];
+    // the 1-judge cases use neutral Jev, not MELCHIOR (whose stance is "keep when unsure")
+    const units: Unit[] = s.magiMode === 'always' || (s.magiMode === 'changes' && (triggered || s.armed !== null)) ? UNITS : [SOLO];
     // the speculative drop questions cost ~1/3 of the tokens; skip them when the music is settled
     const askDrop = triggered || s.armed !== null || s.lastDropSoon >= 0.3 || !(s.lastPhase === 'drop' || s.lastPhase === 'steady');
     const d: Deliberation = {
@@ -425,10 +474,10 @@ export class Director {
         const unit = uv.unit;
         try {
           const cands = this.candidates();
-          const r = await callJev(buildState(this.agg, set, cands, unit), buildQuestions(cands, unit, { askDrop, fx: fxCands }), signal);
+          const r = await callJev(buildState(this.agg, set, cands, unit), buildQuestions(cands, unit, { askDrop, fx: fxCands, eagerness: this.eagerness, softAge: this.policy.softAge }), signal);
           uv.result = r;
           uv.arrivedAt = performance.now();
-          uv.proposal = r.answers.switch_now.noul >= 0.5 && r.answers.scene.choice !== s.scene.id ? r.answers.scene.choice : 'keep';
+          uv.proposal = r.answers.switch_now.noul >= this.policy.threshold && r.answers.scene.choice !== s.scene.id ? r.answers.scene.choice : 'keep';
           const a = r.answers;
           const name = `${uv.unit.name}-${uv.unit.number}`.padEnd(12, ' ');
           const prop = uv.proposal === 'keep' ? '維持' : uv.proposal.toUpperCase();
@@ -525,13 +574,17 @@ export class Director {
 
     // resolution: what is on the table, and does the policy carry it?
     const age = bar - this.sceneStartBar;
-    const maxAge = s.scene.maxBars ?? 32;
+    const p = this.policy;
+    const maxAge = Math.min(s.scene.maxBars ?? 32, p.maxAge);
     const switchVotes = d.units.filter((u) => u.proposal !== null && u.proposal !== 'keep').length;
-    const majoritySwitch = switchVotes * 2 > d.units.length;
+    const majoritySwitch = switchVotes > 0 && switchVotes >= d.units.length * p.voteFrac;
     let target: SceneId | null = null;
-    if (a.scene.choice !== s.scene.id && (majoritySwitch || a.switch_now.noul >= 0.5 || (age >= 16 && a.switch_now.noul >= 0.3) || age >= maxAge || (a.scene.probabilities[a.scene.choice] ?? 0) >= 0.7)) {
+    if (
+      a.scene.choice !== s.scene.id &&
+      (majoritySwitch || a.switch_now.noul >= p.threshold || (age >= p.softAge && a.switch_now.noul >= p.softThreshold) || age >= maxAge || (a.scene.probabilities[a.scene.choice] ?? 0) >= p.sceneProb)
+    ) {
       target = a.scene.choice;
-    } else if (a.scene.choice === s.scene.id && (a.switch_now.noul >= 0.7 || age >= maxAge)) {
+    } else if (a.scene.choice === s.scene.id && (a.switch_now.noul >= p.threshold + 0.2 || age >= maxAge)) {
       const runner = (Object.entries(a.scene.probabilities) as [SceneId, number][])
         .filter(([id]) => id !== s.scene.id)
         .sort((x, y) => y[1] - x[1])[0];
@@ -569,7 +622,7 @@ export class Director {
 
     // settled music (drop / steady, nobody wants to move, no drop coming): ask half as often
     const settled = (a.phase.choice === 'drop' || a.phase.choice === 'steady') && a.switch_now.noul < 0.3 && a.drop_soon.noul < 0.3 && !s.armed;
-    s.nextIntervalBars = settled ? Math.max(s.intervalBars, 4) : s.intervalBars;
+    s.nextIntervalBars = settled && p.slowWhenSettled ? Math.max(s.intervalBars, 4) : s.intervalBars;
 
     // 決め場: the logo goes up when the council agrees this is the peak
     const kimeVotes = d.units.filter((u) => u.result && u.result.answers.kime.noul >= 0.5).length;
@@ -597,7 +650,7 @@ export class Director {
       s.scene = to;
       s.transition = null;
     } else {
-      s.transition = { to, kind: 'crossfade', progress: 0 };
+      s.transition = { to, kind: 'crossfade', progress: 0, startedAt: performance.now() };
     }
     this.log('switch', `${kind} → ${to.name} (${why})`);
   }
@@ -626,13 +679,7 @@ export class Director {
         this.switchTo(next.id, 'cut', 'エラー回避', this.sceneStartBar);
       }
     }
-    if (s.transition) {
-      s.transition.progress += dt / this.barDuration;
-      if (s.transition.progress >= 1) {
-        s.scene = s.transition.to;
-        s.transition = null;
-      }
-    }
+    this.advanceTransition();
     if (s.flash > 0) s.flash = Math.max(0, s.flash - dt * 6);
   }
 }
