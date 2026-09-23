@@ -103,3 +103,9 @@ details > summary { cursor: pointer; }
 .source-body > div { display: flex; flex-direction: column; gap: 4px; }
 button.play { min-width: 76px; font-weight: 600; }
 .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.scenes.editing .scene-item { cursor: grab; outline: 1px dashed var(--line); outline-offset: 1px; border-radius: 4px; }
+.scenes.editing .scene-item button:not(.rm) { cursor: grab; }
+.scene-item.dragging { opacity: 0.35; }
+.scene-item.drop-before { box-shadow: -3px 0 0 var(--acc); }
+.scene-item.drop-after { box-shadow: 3px 0 0 var(--acc); }

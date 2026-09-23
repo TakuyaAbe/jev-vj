@@ -10,8 +10,8 @@ export interface TrackInfo {
   note?: string;
 }
 
-/** keys for the 年中行事 scenes, January → December */
-export const MONTH_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'q', 'w'];
+/** keys for the first 20 scenes in the list, top to bottom */
+export const SCENE_KEYS = [...'1234567890qwertyuiop'];
 
 export type SourceMode = 'demo' | 'tracks' | 'file' | 'mic' | 'system' | 'url';
 
@@ -42,6 +42,8 @@ export interface UiCallbacks {
   /** scene picker */
   selectScene(id: SceneId): void;
   setSceneEnabled(id: SceneId, on: boolean): void;
+  /** edit mode: the scene list was rearranged (null = back to the default order) */
+  reorderScenes(ids: string[] | null): void;
   /** 'all' or a scene group */
   setScenePreset(kind: string): void;
   /** shader / plugin files picked or dropped */
@@ -102,6 +104,10 @@ export class Ui {
   private readonly modeBodies = new Map<SourceMode, HTMLElement>();
   private readonly playBtn: HTMLButtonElement;
   private overlayCb: HTMLInputElement | null = null;
+  private editMode = false;
+  private readonly editBtn: HTMLButtonElement;
+  private readonly resetOrderBtn: HTMLButtonElement;
+  private dragId: string | null = null;
   private readonly fileName: HTMLElement;
   private readonly seekRow: HTMLElement;
   /** the source picked in the Source tabs */
@@ -318,6 +324,15 @@ export class Ui {
     scSec.append(el('h2', '', 'Scenes (素材)'));
     this.presetRow = el('div', 'row');
     this.sceneGrid = el('div', 'scenes');
+    const editRow = el('div', 'row');
+    this.editBtn = el('button', '', '並び替え');
+    this.editBtn.title = '編集モード: ドラッグ & ドロップで順番を変える（上から 20 個にキー 1〜0, q〜p）';
+    this.editBtn.onclick = () => this.setEditMode(!this.editMode);
+    const resetBtn = el('button', '', '既定の順に戻す');
+    resetBtn.onclick = () => cb.reorderScenes(null);
+    resetBtn.style.display = 'none';
+    this.resetOrderBtn = resetBtn;
+    editRow.append(this.editBtn, resetBtn);
     const plugInput = el('input');
     plugInput.type = 'file';
     plugInput.multiple = true;
@@ -333,8 +348,9 @@ export class Ui {
     plugRow.append(plugBtn, plugInput);
     scSec.append(
       this.presetRow,
+      editRow,
       this.sceneGrid,
-      el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。キー 1〜9, 0, q, w = 年中行事の 1〜12 月'),
+      el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。キー 1〜0, q〜p = 上から 20 個。「並び替え」でドラッグして順番を変えられる'),
       plugRow,
       el('div', 'hint', 'ISF (.fs) / Shadertoy (mainImage) / GLSL / JS モジュールを画面にドロップしても追加できる。ISF のフィルタは FX に入る。追加分はブラウザに保存され、× で削除'),
     );
@@ -535,16 +551,20 @@ export class Ui {
     }
     this.sceneGrid.replaceChildren();
     this.sceneButtons.clear();
-    scenes.forEach((sc) => {
+    scenes.forEach((sc, i) => {
       const item = el('div', `scene-item g-${sc.group}${sc.error ? ' broken' : ''}`);
+      item.dataset.id = sc.id;
+      this.makeDraggable(item);
       const cbx = el('input');
       cbx.type = 'checkbox';
       cbx.checked = true;
       cbx.onchange = () => this.cb.setSceneEnabled(sc.id, cbx.checked);
       const btn = el('button', '', sc.name);
       btn.title = sc.error ? `エラー: ${sc.error}` : `${sc.description}${sc.source ? `\n${sc.source}` : ''}`;
-      btn.onclick = () => this.cb.selectScene(sc.id);
-      const key = sc.month ? MONTH_KEYS[sc.month - 1]! : '';
+      btn.onclick = () => {
+        if (!this.editMode) this.cb.selectScene(sc.id);
+      };
+      const key = SCENE_KEYS[i] ?? '';
       item.append(cbx, btn);
       if (sc.group === 'user') {
         const rm = el('button', 'rm', '×');
@@ -555,6 +575,56 @@ export class Ui {
       item.append(el('span', 'hint key', key));
       this.sceneGrid.append(item);
       this.sceneButtons.set(sc.id, { btn, cb: cbx });
+    });
+    this.setEditMode(this.editMode);
+  }
+
+  private setEditMode(on: boolean): void {
+    this.editMode = on;
+    this.editBtn.classList.toggle('on', on);
+    this.editBtn.textContent = on ? '完了' : '並び替え';
+    this.resetOrderBtn.style.display = on ? '' : 'none';
+    this.sceneGrid.classList.toggle('editing', on);
+    for (const item of this.sceneGrid.children) (item as HTMLElement).draggable = on;
+  }
+
+  /** HTML5 drag & drop inside the scene grid (edit mode only). */
+  private makeDraggable(item: HTMLElement): void {
+    item.draggable = this.editMode;
+    item.addEventListener('dragstart', (e) => {
+      if (!this.editMode) return e.preventDefault();
+      this.dragId = item.dataset.id ?? null;
+      item.classList.add('dragging');
+      e.dataTransfer?.setData('text/plain', this.dragId ?? '');
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    item.addEventListener('dragend', () => {
+      this.dragId = null;
+      item.classList.remove('dragging');
+      for (const x of this.sceneGrid.children) x.classList.remove('drop-before', 'drop-after');
+    });
+    const after = (e: DragEvent): boolean => {
+      const r = item.getBoundingClientRect();
+      return e.clientX > r.left + r.width / 2;
+    };
+    item.addEventListener('dragover', (e) => {
+      if (!this.editMode || !this.dragId || this.dragId === item.dataset.id) return;
+      e.preventDefault();
+      e.stopPropagation(); // keep the page-level file drop overlay out of it
+      const a = after(e);
+      item.classList.toggle('drop-after', a);
+      item.classList.toggle('drop-before', !a);
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drop-before', 'drop-after'));
+    item.addEventListener('drop', (e) => {
+      if (!this.editMode || !this.dragId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const ids = [...this.sceneGrid.children].map((x) => (x as HTMLElement).dataset.id!).filter((id) => id !== this.dragId);
+      let at = ids.indexOf(item.dataset.id!);
+      if (after(e)) at++;
+      ids.splice(at, 0, this.dragId);
+      this.cb.reorderScenes(ids);
     });
   }
 

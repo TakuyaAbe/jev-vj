@@ -35,11 +35,29 @@ export function registerScenes(scenes: Scene[], silent = false): Scene[] {
     if (old) replaced.push(old);
     SCENE_BY_ID[sc.id] = sc;
   }
-  // 年中行事 first in month order (they own the 1..0 q w keys); the rest keep registration order
-  const order = new Map(SCENES.map((sc, i) => [sc, i]));
-  SCENES.sort((x, y) => (x.month ?? 99) - (y.month ?? 99) || order.get(x)! - order.get(y)!);
+  sortScenes();
   if (!silent) emit();
   return replaced;
+}
+
+/** ids in the order the VJ arranged them (edit mode); empty = default order */
+let preferredOrder: string[] = [];
+
+/**
+ * Default order: 年中行事 first by month, then registration order. A saved
+ * arrangement wins; scenes it does not mention (new plugins) go after it.
+ */
+function sortScenes(): void {
+  const reg = new Map(SCENES.map((sc, i) => [sc, i]));
+  const pref = new Map(preferredOrder.map((id, i) => [id, i]));
+  const rank = (sc: Scene): number => pref.get(sc.id) ?? preferredOrder.length;
+  SCENES.sort((x, y) => rank(x) - rank(y) || (x.month ?? 99) - (y.month ?? 99) || reg.get(x)! - reg.get(y)!);
+}
+
+export function setSceneOrder(ids: string[]): void {
+  preferredOrder = [...ids];
+  sortScenes();
+  emit();
 }
 
 export function registerEffects(effects: Effect[], silent = false): void {

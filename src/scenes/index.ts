@@ -4,7 +4,7 @@ import { HINA_2D } from './hina';
 import { bundledPlugins } from '../plugins/loader';
 import { EFFECTS, registerEffects, registerScenes, SCENES } from './registry';
 
-export { EFFECTS, SCENES, SCENE_BY_ID, sceneById, onRegistryChange, registerScenes, registerEffects, unregister, usableScenes, prewarm } from './registry';
+export { EFFECTS, SCENES, SCENE_BY_ID, sceneById, onRegistryChange, registerScenes, registerEffects, setSceneOrder, unregister, usableScenes, prewarm } from './registry';
 
 export const PALETTES: Record<PaletteId, Palette> = {
   warm: { bg: '#12060a', a: '#ff4d2e', b: '#ffb020', c: '#ffe8c0' },

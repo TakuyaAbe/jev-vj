@@ -7,10 +7,10 @@ import { DEMO_BPM, demoSectionAt, renderDemoTrack } from './demo-track';
 import { Director } from './director';
 import { BarAggregator } from './features';
 import { Renderer } from './render';
-import { EFFECTS, onRegistryChange, prewarm, registerEffects, registerScenes, resetSceneState, SCENES, unregister } from './scenes';
+import { EFFECTS, onRegistryChange, prewarm, registerEffects, registerScenes, resetSceneState, SCENES, setSceneOrder, unregister } from './scenes';
 import { exposeGlobalApi, fromFile, MODULE_EXT, SHADER_EXT, type Loaded } from './plugins/loader';
 import { saveSettings, settings } from './settings';
-import { GROUP_LABELS, MONTH_KEYS, Ui, type EffectMode, type SourceMode, type TrackInfo, type UiCallbacks } from './ui';
+import { GROUP_LABELS, SCENE_KEYS, Ui, type EffectMode, type SourceMode, type TrackInfo, type UiCallbacks } from './ui';
 import type { BeatInfo, Effect, RenderInput } from './types';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
@@ -356,6 +356,10 @@ const cbs: UiCallbacks = {
     saveEnabledScenes();
     ui.log({ t: performance.now(), kind: 'info', text: `素材セット: ${kind === 'all' ? 'すべて' : (GROUP_LABELS[kind] ?? kind)}（${director.candidates().length} scenes）` });
   },
+  reorderScenes(ids) {
+    saveSettings({ sceneOrder: ids ?? [] });
+    setSceneOrder(ids ?? []);
+  },
   loadPlugins(files) {
     void loadPluginFiles(files);
   },
@@ -457,6 +461,7 @@ director.onLog = (e) => {
   ui.log(e);
   terminal.push(e);
 };
+if (settings.sceneOrder.length) setSceneOrder(settings.sceneOrder);
 ui.setScenes(SCENES);
 ui.setEffects(EFFECTS, fxModes);
 onRegistryChange(() => {
@@ -483,20 +488,36 @@ void (async () => {
     for (const f of failed) logError(`${f.id}: コンパイル失敗 ${f.error.split('\n')[0]}`);
   });
 })();
-// drag & drop: shaders / plugins / audio anywhere on the page
-window.addEventListener('dragover', (e) => {
-  e.preventDefault();
+// drag & drop: shaders / plugins / audio anywhere on the page. Only real file drags
+// from outside count (not scene reordering or dragged text); enter/leave fire per
+// child element, so a depth counter decides when the pointer has really left.
+const isFileDrag = (e: DragEvent): boolean => e.dataTransfer?.types.includes('Files') ?? false;
+let dropDepth = 0;
+const hideDrop = (): void => {
+  dropDepth = 0;
+  document.body.classList.remove('dropping');
+};
+window.addEventListener('dragenter', (e) => {
+  if (!isFileDrag(e)) return;
+  dropDepth++;
   document.body.classList.add('dropping');
 });
 window.addEventListener('dragleave', (e) => {
-  if (e.relatedTarget === null) document.body.classList.remove('dropping');
+  if (!isFileDrag(e)) return;
+  if (--dropDepth <= 0) hideDrop();
+});
+window.addEventListener('dragover', (e) => {
+  if (isFileDrag(e)) e.preventDefault();
 });
 window.addEventListener('drop', (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
-  document.body.classList.remove('dropping');
+  hideDrop();
   const files = [...(e.dataTransfer?.files ?? [])];
   if (files.length) void loadPluginFiles(files);
 });
+window.addEventListener('dragend', hideDrop);
+window.addEventListener('blur', hideDrop);
 director.onDeliberation = (d) => ui.showDeliberation(d);
 director.onLogo = (show) => (show ? logo.show(performance.now()) : logo.hide(performance.now()));
 window.addEventListener('keydown', (e) => {
@@ -508,11 +529,11 @@ window.addEventListener('keydown', (e) => {
     cbs.setOverlay(!terminal.enabled);
     ui.setOverlayChecked(terminal.enabled);
   }
-  // 1..9, 0, q, w = 年中行事 January..December
-  const month = MONTH_KEYS.indexOf(e.key) + 1;
-  if (month > 0 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    const sc = SCENES.find((x) => x.month === month && !x.error);
-    if (sc) director.manualSelect(sc.id, lastBeat.bar);
+  // 1..0, q..p = the first 20 scenes in the list
+  const k = SCENE_KEYS.indexOf(e.key);
+  if (k >= 0 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const sc = SCENES[k];
+    if (sc && !sc.error) director.manualSelect(sc.id, lastBeat.bar);
   }
   if (e.key === 'l') {
     if (director.state.logo.active) director.hideLogo(lastBeat.bar);

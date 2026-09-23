@@ -14,6 +14,8 @@ export interface Settings {
   fontShuffle: { enabled: boolean; intervalSec: number; beatSync: boolean };
   /** scene ids Jev may pick; null = all */
   enabledScenes: string[] | null;
+  /** scene list order from edit mode; empty = default */
+  sceneOrder: string[];
 }
 
 const KEY = 'jev-vj.settings';
@@ -29,6 +31,7 @@ const DEFAULTS: Settings = {
   context: '',
   fontShuffle: { enabled: true, intervalSec: 0.4, beatSync: true },
   enabledScenes: null,
+  sceneOrder: [],
 };
 
 function load(): Settings {
