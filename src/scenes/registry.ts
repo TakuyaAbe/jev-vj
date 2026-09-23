@@ -35,6 +35,9 @@ export function registerScenes(scenes: Scene[], silent = false): Scene[] {
     if (old) replaced.push(old);
     SCENE_BY_ID[sc.id] = sc;
   }
+  // 年中行事 first in month order (they own the 1..0 q w keys); the rest keep registration order
+  const order = new Map(SCENES.map((sc, i) => [sc, i]));
+  SCENES.sort((x, y) => (x.month ?? 99) - (y.month ?? 99) || order.get(x)! - order.get(y)!);
   if (!silent) emit();
   return replaced;
 }

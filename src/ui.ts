@@ -2,12 +2,16 @@ import type { DecisionReason, Deliberation, DirectorState, LogEntry } from './di
 import type { JevResult } from './jev';
 import type { BeatInfo, Effect, FrameFeatures, Scene, SceneId } from './types';
 import { EN_PRESETS, JP_PRESETS, MONO_PRESETS } from './fonts';
+import { saveSettings, settings } from './settings';
 
 export interface TrackInfo {
   file: string;
   label: string;
   note?: string;
 }
+
+/** keys for the 年中行事 scenes, January → December */
+export const MONTH_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'q', 'w'];
 
 export type SourceMode = 'demo' | 'tracks' | 'file' | 'mic' | 'system' | 'url';
 
@@ -97,6 +101,7 @@ export class Ui {
   private readonly modeButtons = new Map<SourceMode, HTMLButtonElement>();
   private readonly modeBodies = new Map<SourceMode, HTMLElement>();
   private readonly playBtn: HTMLButtonElement;
+  private overlayCb: HTMLInputElement | null = null;
   private readonly fileName: HTMLElement;
   private readonly seekRow: HTMLElement;
   /** the source picked in the Source tabs */
@@ -154,6 +159,7 @@ export class Ui {
     this.trackSelect.style.minWidth = '0';
     this.trackSelect.onchange = () => {
       this.showTrackNote();
+      saveSettings({ track: Number(this.trackSelect.value) });
       // while a track is playing, picking another one switches to it
       if (this.playing === 'tracks') cb.playTrack(Number(this.trackSelect.value));
     };
@@ -168,7 +174,7 @@ export class Ui {
     const autoRow = el('label', 'row hint');
     const auto = el('input');
     auto.type = 'checkbox';
-    auto.checked = true;
+    auto.checked = settings.autoAdvance;
     auto.onchange = () => cb.setAutoAdvance(auto.checked);
     autoRow.append(auto, document.createTextNode('曲が終わったら次へ'));
     trBody.append(plRow, this.trackNote, autoRow, el('div', 'hint', 'public/tracks の CC 音源'));
@@ -230,6 +236,7 @@ export class Ui {
     this.playBtn.onclick = () => this.togglePlay();
     const muteBtn = el('button', '', 'Mute');
     muteBtn.title = 'スピーカーだけ切って解析は続ける';
+    muteBtn.classList.toggle('on', settings.muted);
     muteBtn.onclick = () => muteBtn.classList.toggle('on', cb.toggleMute());
     this.statusEl = el('span', 'hint status', 'stopped');
     trRow.append(this.playBtn, muteBtn, this.statusEl);
@@ -252,13 +259,14 @@ export class Ui {
     this.seekRow = seekRow;
     tr.append(trRow, seekRow);
     this.panel.append(tr);
-    this.selectMode('demo');
+    this.selectMode(settings.sourceMode);
 
     // context + interval
     const ctxSec = el('section');
     ctxSec.append(el('h2', '', 'Context for Jev'));
     const ta = el('textarea');
     ta.placeholder = 'ジャンル・雰囲気・今夜の狙いなど（例: メロディックテクノ、深夜のピークタイム、赤系は避けたい）';
+    ta.value = settings.context;
     ta.oninput = () => cb.setContext(ta.value);
     const row2 = el('div', 'row');
     row2.append(el('span', 'hint', 'ask every'));
@@ -266,7 +274,7 @@ export class Ui {
     for (const n of [1, 2, 4, 8]) {
       const o = el('option', '', `${n} bar${n > 1 ? 's' : ''}`);
       o.value = String(n);
-      if (n === 2) o.selected = true;
+      if (n === settings.intervalBars) o.selected = true;
       sel.append(o);
     }
     sel.onchange = () => cb.setInterval(Number(sel.value));
@@ -291,13 +299,15 @@ export class Ui {
       o.value = v;
       magiSel.append(o);
     }
+    magiSel.value = settings.magiMode;
     magiSel.onchange = () => cb.setMagiMode(magiSel.value as 'always' | 'changes' | 'single');
     magiLabel.append(magiSel);
     const ovLabel = el('label', 'row hint');
     const ovCb = el('input');
     ovCb.type = 'checkbox';
-    ovCb.checked = true;
+    ovCb.checked = settings.overlay;
     ovCb.onchange = () => cb.setOverlay(ovCb.checked);
+    this.overlayCb = ovCb;
     ovLabel.append(ovCb, document.createTextNode('CLI ログ表示 (m)'));
     row3.append(magiLabel, ovLabel);
     ctxSec.append(ta, row2, row3);
@@ -324,7 +334,7 @@ export class Ui {
     scSec.append(
       this.presetRow,
       this.sceneGrid,
-      el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。数字キー 1〜9, 0 でも切替'),
+      el('div', 'hint', 'チェック = Jev の候補に入れる。名前クリック = 今すぐ切替（8 小節ホールド）。キー 1〜9, 0, q, w = 年中行事の 1〜12 月'),
       plugRow,
       el('div', 'hint', 'ISF (.fs) / Shadertoy (mainImage) / GLSL / JS モジュールを画面にドロップしても追加できる。ISF のフィルタは FX に入る。追加分はブラウザに保存され、× で削除'),
     );
@@ -436,13 +446,14 @@ export class Ui {
     const shLabel = el('label', 'row hint');
     const shCb = el('input');
     shCb.type = 'checkbox';
+    shCb.checked = settings.fontShuffle.enabled;
     shLabel.append(shCb, document.createTextNode('ロゴのフォントをランダム切替'));
     const shInterval = el('input');
     shInterval.type = 'number';
     shInterval.min = '0.05';
     shInterval.max = '10';
     shInterval.step = '0.05';
-    shInterval.value = '0.4';
+    shInterval.value = String(settings.fontShuffle.intervalSec);
     shInterval.style.width = '64px';
     shInterval.style.font = 'inherit';
     shInterval.style.background = '#101018';
@@ -453,6 +464,7 @@ export class Ui {
     const beatLabel = el('label', 'row hint');
     const beatCb = el('input');
     beatCb.type = 'checkbox';
+    beatCb.checked = settings.fontShuffle.beatSync;
     beatLabel.append(beatCb, document.createTextNode('ビート同期'));
     const shStatus = el('span', 'hint', '');
     const emitShuffle = (): void =>
@@ -463,6 +475,8 @@ export class Ui {
     shInterval.onchange = emitShuffle;
     beatCb.onchange = emitShuffle;
     shRow.append(shLabel, shInterval, el('span', 'hint', 'sec'), beatLabel, shStatus);
+    // apply the remembered shuffle once the app has finished wiring up
+    if (shCb.checked) setTimeout(emitShuffle, 0);
     fontSec.append(shRow, el('div', 'hint', 'プルダウンは全候補が常に出る。Google Fonts にある family ならテキスト欄から追加できる'));
     this.panel.append(fontSec);
 
@@ -521,7 +535,7 @@ export class Ui {
     }
     this.sceneGrid.replaceChildren();
     this.sceneButtons.clear();
-    scenes.forEach((sc, i) => {
+    scenes.forEach((sc) => {
       const item = el('div', `scene-item g-${sc.group}${sc.error ? ' broken' : ''}`);
       const cbx = el('input');
       cbx.type = 'checkbox';
@@ -530,7 +544,7 @@ export class Ui {
       const btn = el('button', '', sc.name);
       btn.title = sc.error ? `エラー: ${sc.error}` : `${sc.description}${sc.source ? `\n${sc.source}` : ''}`;
       btn.onclick = () => this.cb.selectScene(sc.id);
-      const key = i < 9 ? String(i + 1) : i === 9 ? '0' : '';
+      const key = sc.month ? MONTH_KEYS[sc.month - 1]! : '';
       item.append(cbx, btn);
       if (sc.group === 'user') {
         const rm = el('button', 'rm', '×');
@@ -544,6 +558,10 @@ export class Ui {
     });
   }
 
+  setOverlayChecked(on: boolean): void {
+    if (this.overlayCb) this.overlayCb.checked = on;
+  }
+
   setEffects(effects: Effect[], modes: Map<string, EffectMode>): void {
     this.fxList.replaceChildren();
     if (effects.length === 0) this.fxList.append(el('div', 'hint', '（なし）'));
@@ -553,7 +571,7 @@ export class Ui {
       name.title = fx.error ? `エラー: ${fx.error}` : fx.description;
       const sel = el('select');
       for (const m of ['off', 'jev', 'auto', 'beat', 'on'] as const) sel.append(new Option(m === 'jev' ? 'jev (AI)' : m, m));
-      sel.value = modes.get(fx.id) ?? 'off';
+      sel.value = modes.get(fx.id) ?? 'auto';
       sel.onchange = () => this.cb.setEffectMode(fx.id, sel.value as EffectMode);
       row.append(name, sel);
       if (fx.id.startsWith('user_')) {
@@ -669,11 +687,13 @@ export class Ui {
         return o;
       }),
     );
+    if (settings.track < tracks.length) this.trackSelect.value = String(settings.track);
     this.showTrackNote();
   }
 
   selectTrack(index: number): void {
     this.trackSelect.value = String(index);
+    saveSettings({ track: index });
     this.showTrackNote();
   }
 
@@ -705,7 +725,9 @@ export class Ui {
 
   /** Pick a source. Does not interrupt what is playing; ▶ starts the picked one. */
   selectMode(m: SourceMode): void {
+    if (!this.modeButtons.has(m)) m = 'demo';
     this.mode = m;
+    if (settings.sourceMode !== m) saveSettings({ sourceMode: m });
     for (const [k, b] of this.modeButtons) b.classList.toggle('on', k === m);
     this.sourceBody.replaceChildren(this.modeBodies.get(m) ?? el('div'));
     this.refreshTransport();

@@ -9,7 +9,8 @@ import { BarAggregator } from './features';
 import { Renderer } from './render';
 import { EFFECTS, onRegistryChange, prewarm, registerEffects, registerScenes, resetSceneState, SCENES, unregister } from './scenes';
 import { exposeGlobalApi, fromFile, MODULE_EXT, SHADER_EXT, type Loaded } from './plugins/loader';
-import { GROUP_LABELS, Ui, type EffectMode, type SourceMode, type TrackInfo, type UiCallbacks } from './ui';
+import { saveSettings, settings } from './settings';
+import { GROUP_LABELS, MONTH_KEYS, Ui, type EffectMode, type SourceMode, type TrackInfo, type UiCallbacks } from './ui';
 import type { BeatInfo, Effect, RenderInput } from './types';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
@@ -32,7 +33,7 @@ function readFonts(): { jp: string; en: string; log: string } {
 const fonts = readFonts();
 const LOGO_KEY = 'jev-vj.logo';
 function readLogo(): { main: string; sub: string; subAbove: boolean } {
-  const def = { main: '🍲闇鍋🍲', sub: 'BAKUROCHO DOMINO CLUB PRESENTS', subAbove: true };
+  const def = { main: 'HINA-MATSURI', sub: 'HELLO WORLD CLUB PRESENTS', subAbove: true };
   try {
     const raw = localStorage.getItem(LOGO_KEY);
     if (raw) return { ...def, ...(JSON.parse(raw) as Partial<typeof def>) };
@@ -137,7 +138,7 @@ function effectChain(input: RenderInput): { fx: Effect; amount: number }[] {
   const chosen = director.state.fx;
   const step = input.dt / Math.max(0.5, input.bpm > 0 ? (60 / input.bpm) * 4 : 2);
   for (const fx of EFFECTS) {
-    const mode = fxModes.get(fx.id);
+    const mode = fxModes.get(fx.id) ?? 'auto';
     if (mode === 'jev') {
       const target = fx.id === chosen ? 1 : 0;
       const cur = jevFxLevel.get(fx.id) ?? 0;
@@ -185,6 +186,7 @@ const logError = (text: string): void => director.onLog?.({ t: performance.now()
 function ensureAudio(): AudioEngine {
   if (audio) return audio;
   audio = new AudioEngine();
+  audio.muted = settings.muted;
   audio.onFrame = (f) => {
     beatAcc.sum += f.rms;
     beatAcc.n++;
@@ -257,6 +259,8 @@ beat.onBar = (info) => {
   director.onBar(info.bar, elapsed());
 };
 
+const saveEnabledScenes = (): void => saveSettings({ enabledScenes: director.enabledScenes.size ? [...director.enabledScenes] : null });
+
 const cbs: UiCallbacks = {
   async playDemo() {
     userStarted = true;
@@ -309,9 +313,11 @@ const cbs: UiCallbacks = {
   },
   setMagiMode(mode) {
     director.state.magiMode = mode;
+    saveSettings({ magiMode: mode });
   },
   setOverlay(on) {
     terminal.enabled = on;
+    saveSettings({ overlay: on });
   },
   logoNow() {
     if (director.state.logo.active) director.hideLogo(lastBeat.bar);
@@ -340,12 +346,14 @@ const cbs: UiCallbacks = {
     else set.delete(id);
     if (set.size === SCENES.length) set.clear();
     ui.setEnabledScenes(set);
+    saveEnabledScenes();
   },
   setScenePreset(kind) {
     const set = director.enabledScenes;
     set.clear();
     if (kind !== 'all') for (const sc of SCENES) if (sc.group === kind || (kind === 'nenju' && sc.month)) set.add(sc.id);
     ui.setEnabledScenes(set);
+    saveEnabledScenes();
     ui.log({ t: performance.now(), kind: 'info', text: `素材セット: ${kind === 'all' ? 'すべて' : (GROUP_LABELS[kind] ?? kind)}（${director.candidates().length} scenes）` });
   },
   loadPlugins(files) {
@@ -359,8 +367,7 @@ const cbs: UiCallbacks = {
     saveUserPlugins();
   },
   setEffectMode(id, mode) {
-    if (mode === 'off') fxModes.delete(id);
-    else fxModes.set(id, mode);
+    fxModes.set(id, mode);
     saveFxModes();
   },
   async setFont(which, family) {
@@ -390,6 +397,7 @@ const cbs: UiCallbacks = {
     return { ...fonts };
   },
   setFontShuffle(opts, onStatus) {
+    saveSettings({ fontShuffle: opts });
     void setFontShuffle(opts, onStatus);
   },
   stop() {
@@ -399,6 +407,7 @@ const cbs: UiCallbacks = {
   toggleMute() {
     const a = ensureAudio();
     a.muted = !a.muted;
+    saveSettings({ muted: a.muted });
     return a.muted;
   },
   playTrack(index) {
@@ -412,13 +421,16 @@ const cbs: UiCallbacks = {
   },
   setAutoAdvance(on) {
     autoAdvance = on;
+    saveSettings({ autoAdvance: on });
   },
   setInterval(bars) {
     director.state.intervalBars = bars;
+    saveSettings({ intervalBars: bars });
   },
   setContext(text) {
     userText = text;
     updateContext();
+    saveSettings({ context: text });
   },
   askNow() {
     void director.decide('manual', lastBeat.bar, elapsed(), lastBeat.bpm);
@@ -429,6 +441,13 @@ const cbs: UiCallbacks = {
   },
 };
 const ui = new Ui(cbs);
+// remembered panel settings (the controls already show them)
+director.state.intervalBars = settings.intervalBars;
+director.state.magiMode = settings.magiMode;
+terminal.enabled = settings.overlay;
+autoAdvance = settings.autoAdvance;
+userText = settings.context;
+updateContext();
 
 function updateContext(): void {
   director.userContext = [userText.trim(), nowPlaying].filter(Boolean).join('。');
@@ -456,6 +475,10 @@ void (async () => {
     userPlugins = [];
   }
   for (const p of userPlugins) await addPluginText(p.name, p.text, false);
+  if (settings.enabledScenes) {
+    for (const id of settings.enabledScenes) if (SCENES.some((sc) => sc.id === id)) director.enabledScenes.add(id);
+    ui.setEnabledScenes(director.enabledScenes);
+  }
   prewarm((failed) => {
     for (const f of failed) logError(`${f.id}: コンパイル失敗 ${f.error.split('\n')[0]}`);
   });
@@ -481,10 +504,14 @@ window.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
   if (t instanceof HTMLInputElement && ['text', 'number', 'search', 'url'].includes(t.type)) return;
-  if (e.key === 'm') terminal.enabled = !terminal.enabled;
-  if (/^[0-9]$/.test(e.key)) {
-    const idx = e.key === '0' ? 9 : Number(e.key) - 1;
-    const sc = SCENES[idx];
+  if (e.key === 'm') {
+    cbs.setOverlay(!terminal.enabled);
+    ui.setOverlayChecked(terminal.enabled);
+  }
+  // 1..9, 0, q, w = 年中行事 January..December
+  const month = MONTH_KEYS.indexOf(e.key) + 1;
+  if (month > 0 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const sc = SCENES.find((x) => x.month === month && !x.error);
     if (sc) director.manualSelect(sc.id, lastBeat.bar);
   }
   if (e.key === 'l') {
