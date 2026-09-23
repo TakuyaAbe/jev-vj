@@ -109,3 +109,4 @@ button.play { min-width: 76px; font-weight: 600; }
 .scene-item.dragging { opacity: 0.35; }
 .scene-item.drop-before { box-shadow: -3px 0 0 var(--acc); }
 .scene-item.drop-after { box-shadow: 3px 0 0 var(--acc); }
+input.num { width: 52px; font: inherit; background: #101018; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }

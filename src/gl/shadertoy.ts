@@ -107,6 +107,7 @@ export function makeShadertoyScene(src: string, opts: ShadertoyOptions): Scene {
     description: m.description ?? `Shadertoy 形式のシェーダー ${m.name ?? opts.fallbackName}`,
     short: m.short,
     maxBars: m.maxBars,
+    month: m.month,
     group: m.group ?? 'shadertoy',
     source: opts.source,
     prepare() {

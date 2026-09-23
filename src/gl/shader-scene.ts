@@ -17,6 +17,7 @@ export interface ShaderSceneDef {
   maxBars?: number;
   short?: string;
   source?: string;
+  month?: number;
   frag: string;
 }
 
@@ -43,6 +44,7 @@ export function makeShaderScene(def: ShaderSceneDef): Scene {
     maxBars: def.maxBars,
     short: def.short,
     source: def.source,
+    month: def.month,
     prepare() {
       ensure();
       const err = GlContext.get().tryCompile(scene!, camera!);

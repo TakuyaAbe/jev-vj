@@ -17,6 +17,8 @@ export interface PluginMeta {
   short?: string;
   group?: string;
   maxBars?: number;
+  /** 年中行事: month 1..12 */
+  month?: number;
 }
 
 const TAG = /^\s*(?:\/\/+|\*|\/\*+)?\s*@(\w+)\s+(.+?)\s*(?:\*\/)?\s*$/;
@@ -29,6 +31,7 @@ export function parseCommentMeta(src: string): PluginMeta {
     if (!m) continue;
     const [, key, value] = m as unknown as [string, string, string];
     if (key === 'maxBars') meta.maxBars = Number(value) || undefined;
+    else if (key === 'month') meta.month = Number(value) || undefined;
     else if (key === 'name' || key === 'description' || key === 'short' || key === 'group' || key === 'id') meta[key] = value;
   }
   return meta;

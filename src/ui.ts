@@ -13,7 +13,10 @@ export interface TrackInfo {
 /** keys for the first 20 scenes in the list, top to bottom */
 export const SCENE_KEYS = [...'1234567890qwertyuiop'];
 
-export type SourceMode = 'demo' | 'tracks' | 'file' | 'mic' | 'system' | 'url';
+export type SourceMode = 'demo' | 'file' | 'mic' | 'system' | 'url';
+
+const SYNTH_LABEL = '合成デモ（128 BPM テクノ・約 2 分）';
+const SYNTH_NOTE = 'その場で合成するテクノ。intro → build → drop → breakdown → build → drop → outro の展開が入っているので Jev の判断を試しやすい';
 
 /** off / on (full) / auto (follows Jev's intensity) / beat (pulses on the beat) */
 export type EffectMode = 'off' | 'on' | 'auto' | 'beat' | 'jev';
@@ -26,6 +29,7 @@ export const GROUP_LABELS: Record<string, string> = {
   shadertoy: 'Shadertoy',
   user: '追加',
   nenju: '年中行事',
+  wagara: '和柄',
 };
 
 export interface UiCallbacks {
@@ -36,6 +40,7 @@ export interface UiCallbacks {
   stop(): void;
   setMagiMode(mode: 'always' | 'changes' | 'single'): void;
   setOverlay(on: boolean): void;
+  setLogRows(rows: number): void;
   logoNow(): void;
   setLogoText(main: string, sub: string, subAbove: boolean): void;
   getLogoText(): { main: string; sub: string; subAbove: boolean };
@@ -144,7 +149,6 @@ export class Ui {
     this.sourceRow = el('div', 'seg');
     const modes: [SourceMode, string][] = [
       ['demo', 'Demo'],
-      ['tracks', 'Tracks'],
       ['file', 'File'],
       ['mic', 'Mic / line-in'],
       ['system', 'System audio'],
@@ -152,12 +156,7 @@ export class Ui {
     for (const [m, label] of modes) this.addModeButton(m, label);
     this.sourceBody = el('div', 'source-body');
 
-    // demo
-    const demoBody = el('div', '', '');
-    demoBody.append(el('div', 'hint', '128 BPM のテクノを合成（intro → build → drop → breakdown → build → drop → outro、約 3 分）'));
-    this.modeBodies.set('demo', demoBody);
-
-    // tracks (bundled playlist)
+    // demo: the synthesized track and the bundled CC tracks in one list
     const trBody = el('div');
     const plRow = el('div', 'row');
     this.trackSelect = el('select');
@@ -165,9 +164,9 @@ export class Ui {
     this.trackSelect.style.minWidth = '0';
     this.trackSelect.onchange = () => {
       this.showTrackNote();
-      saveSettings({ track: Number(this.trackSelect.value) });
-      // while a track is playing, picking another one switches to it
-      if (this.playing === 'tracks') cb.playTrack(Number(this.trackSelect.value));
+      saveSettings({ track: this.demoItem() });
+      // while a demo is playing, picking another one switches to it
+      if (this.playing === 'demo') this.playDemoItem();
     };
     const prevBtn = el('button', '', '⏮');
     prevBtn.title = '前の曲';
@@ -183,8 +182,8 @@ export class Ui {
     auto.checked = settings.autoAdvance;
     auto.onchange = () => cb.setAutoAdvance(auto.checked);
     autoRow.append(auto, document.createTextNode('曲が終わったら次へ'));
-    trBody.append(plRow, this.trackNote, autoRow, el('div', 'hint', 'public/tracks の CC 音源'));
-    this.modeBodies.set('tracks', trBody);
+    trBody.append(plRow, this.trackNote, autoRow);
+    this.modeBodies.set('demo', trBody);
 
     // file
     const fileBody = el('div');
@@ -315,7 +314,15 @@ export class Ui {
     ovCb.onchange = () => cb.setOverlay(ovCb.checked);
     this.overlayCb = ovCb;
     ovLabel.append(ovCb, document.createTextNode('CLI ログ表示 (m)'));
-    row3.append(magiLabel, ovLabel);
+    const rowsIn = el('input');
+    rowsIn.type = 'number';
+    rowsIn.min = '1';
+    rowsIn.max = '60';
+    rowsIn.value = String(settings.logRows);
+    rowsIn.className = 'num';
+    rowsIn.title = 'CLI ログの行数';
+    rowsIn.onchange = () => cb.setLogRows(Math.max(1, Math.min(60, Math.round(Number(rowsIn.value)) || 10)));
+    row3.append(magiLabel, ovLabel, rowsIn, el('span', 'hint', '行'));
     ctxSec.append(ta, row2, row3);
     this.panel.append(ctxSec);
 
@@ -750,15 +757,31 @@ export class Ui {
 
   setTracks(tracks: TrackInfo[]): void {
     this.tracks = tracks;
-    this.trackSelect.replaceChildren(
+    const synth = el('option', '', SYNTH_LABEL);
+    synth.value = '-1';
+    const group = el('optgroup');
+    group.label = 'CC 楽曲（public/tracks）';
+    group.append(
       ...tracks.map((t, i) => {
         const o = el('option', '', t.label);
         o.value = String(i);
         return o;
       }),
     );
-    if (settings.track < tracks.length) this.trackSelect.value = String(settings.track);
+    this.trackSelect.replaceChildren(synth, ...(tracks.length ? [group] : []));
+    this.trackSelect.value = settings.track < tracks.length ? String(settings.track) : '-1';
     this.showTrackNote();
+  }
+
+  /** -1 = the synthesized demo, otherwise a bundled track index */
+  private demoItem(): number {
+    return Number(this.trackSelect.value);
+  }
+
+  private playDemoItem(): void {
+    const i = this.demoItem();
+    if (i < 0) this.cb.playDemo();
+    else this.cb.playTrack(i);
   }
 
   selectTrack(index: number): void {
@@ -768,15 +791,16 @@ export class Ui {
   }
 
   private showTrackNote(): void {
-    const t = this.tracks[Number(this.trackSelect.value)];
-    this.trackNote.textContent = t?.note ?? '';
+    const i = this.demoItem();
+    this.trackNote.textContent = i < 0 ? SYNTH_NOTE : (this.tracks[i]?.note ?? '');
   }
 
+  /** ⏮ / ⏭ walk the whole list (synth first, then the tracks) and play */
   private step(delta: number): void {
-    if (this.tracks.length === 0) return;
-    const i = (Number(this.trackSelect.value) + delta + this.tracks.length) % this.tracks.length;
-    this.selectTrack(i);
-    this.cb.playTrack(i);
+    const n = this.tracks.length + 1;
+    const pos = (this.demoItem() + 1 + delta + n) % n;
+    this.selectTrack(pos - 1);
+    this.playDemoItem();
   }
 
   setProgress(posSec: number, durationSec: number): void {
@@ -811,10 +835,7 @@ export class Ui {
     }
     switch (this.mode) {
       case 'demo':
-        this.cb.playDemo();
-        break;
-      case 'tracks':
-        if (this.tracks.length) this.cb.playTrack(Number(this.trackSelect.value) || 0);
+        this.playDemoItem();
         break;
       case 'file':
         if (this.pendingFile) this.cb.playFile(this.pendingFile);

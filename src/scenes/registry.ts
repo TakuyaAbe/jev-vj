@@ -51,7 +51,9 @@ function sortScenes(): void {
   const reg = new Map(SCENES.map((sc, i) => [sc, i]));
   const pref = new Map(preferredOrder.map((id, i) => [id, i]));
   const rank = (sc: Scene): number => pref.get(sc.id) ?? preferredOrder.length;
-  SCENES.sort((x, y) => rank(x) - rank(y) || (x.month ?? 99) - (y.month ?? 99) || reg.get(x)! - reg.get(y)!);
+  // 3D 年中行事 first (they get the number keys), then the flat patterns (和柄, 菱餅), then the rest
+  const tier = (sc: Scene): number => (!sc.month ? 2 : sc.group === 'wagara' || sc.id === 'hina_mochi' ? 1 : 0);
+  SCENES.sort((x, y) => rank(x) - rank(y) || tier(x) - tier(y) || (x.month ?? 99) - (y.month ?? 99) || reg.get(x)! - reg.get(y)!);
 }
 
 export function setSceneOrder(ids: string[]): void {

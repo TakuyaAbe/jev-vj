@@ -207,6 +207,7 @@ function makeTerrain(): Scene {
 export const hinaMochi = makeShaderScene({
   id: 'hina_mochi',
   group: 'hina',
+  month: 3,
   name: 'Hishimochi (GLSL)',
   description: 'ひな祭り素材。菱餅の三色（桃・白・緑）の菱形タイルが流れ、ビートでめくれて縁が光る。ポップで硬質。ドロップや安定した進行に合う',
   frag: frag(mochiFrag),

@@ -41,6 +41,7 @@ export function fromShaderSource(text: string, path: string, opts: { idPrefix?: 
         description: meta.description ?? `GLSL シェーダー ${meta.name ?? fallbackName}`,
         short: meta.short,
         maxBars: meta.maxBars,
+        month: meta.month,
         source: path,
         frag: `${common}\n${sourceStart(path)}\n${stripDirectives(text)}\n${SOURCE_END}`,
       }),

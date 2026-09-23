@@ -3,13 +3,16 @@
  * FX modes and runtime plugins keep their own keys; everything else lives here.
  */
 export interface Settings {
-  sourceMode: 'demo' | 'tracks' | 'file' | 'mic' | 'system' | 'url';
+  sourceMode: 'demo' | 'file' | 'mic' | 'system' | 'url';
+  /** item in the Demo list: -1 = synthesized demo, else a bundled track index */
   track: number;
   autoAdvance: boolean;
   muted: boolean;
   intervalBars: number;
   magiMode: 'always' | 'changes' | 'single';
   overlay: boolean;
+  /** rows in the CLI log overlay */
+  logRows: number;
   context: string;
   fontShuffle: { enabled: boolean; intervalSec: number; beatSync: boolean };
   /** scene ids Jev may pick; null = all */
@@ -22,12 +25,13 @@ const KEY = 'jev-vj.settings';
 
 const DEFAULTS: Settings = {
   sourceMode: 'demo',
-  track: 0,
+  track: -1,
   autoAdvance: true,
   muted: false,
   intervalBars: 2,
   magiMode: 'always',
   overlay: true,
+  logRows: 10,
   context: '',
   fontShuffle: { enabled: true, intervalSec: 0.4, beatSync: true },
   enabledScenes: null,

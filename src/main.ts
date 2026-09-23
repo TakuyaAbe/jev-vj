@@ -271,6 +271,7 @@ const cbs: UiCallbacks = {
     resetAll();
     await a.playBuffer(demoBuffer, 'demo');
     currentTrack = -1;
+    ui.selectTrack(-1);
     ui.setStatus(`demo track (${DEMO_BPM} bpm, ${Math.round(demoBuffer.duration)} s)`, 'demo');
     logInfo(`▶ demo track (${DEMO_BPM} bpm, ${Math.round(demoBuffer.duration)} s)`);
   },
@@ -318,6 +319,10 @@ const cbs: UiCallbacks = {
   setOverlay(on) {
     terminal.enabled = on;
     saveSettings({ overlay: on });
+  },
+  setLogRows(rows) {
+    terminal.maxRows = rows;
+    saveSettings({ logRows: rows });
   },
   logoNow() {
     if (director.state.logo.active) director.hideLogo(lastBeat.bar);
@@ -449,6 +454,7 @@ const ui = new Ui(cbs);
 director.state.intervalBars = settings.intervalBars;
 director.state.magiMode = settings.magiMode;
 terminal.enabled = settings.overlay;
+terminal.maxRows = settings.logRows;
 autoAdvance = settings.autoAdvance;
 userText = settings.context;
 updateContext();
@@ -662,7 +668,7 @@ function prefetchNext(): void {
   if (next) void getBuffer(`/tracks/${next.file}`).catch(() => undefined);
 }
 
-async function playUrl(url: string, label: string, offset = 0, kind: SourceMode = 'tracks'): Promise<void> {
+async function playUrl(url: string, label: string, offset = 0, kind: SourceMode = 'demo'): Promise<void> {
   const a = ensureAudio();
   if (!bufferCache.has(url)) ui.setStatus(`fetching ${label}…`, kind);
   try {
@@ -720,7 +726,7 @@ async function resumePlayback(): Promise<void> {
     await start();
     return;
   }
-  ui.selectMode('tracks');
+  ui.selectMode('demo');
   ui.selectTrack(saved.track);
   ui.setStatus(`クリックで再開: ${t.label} @ ${Math.round(target())}s`, null);
   const once = (): void => {

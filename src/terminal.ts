@@ -17,6 +17,8 @@ const VERDICT_KINDS = new Set<LogEntry['kind']>(['approved', 'rejected', 'keep',
  */
 export class TerminalOverlay {
   enabled = true;
+  /** log rows shown above the live line and prompt */
+  maxRows = 10;
   /** Google Fonts family for the log (empty = system monospace) */
   fontFamily = '';
   private lines: Line[] = [];
@@ -54,7 +56,8 @@ export class TerminalOverlay {
     const size = Math.max(12, Math.min(20, h / 52));
     const lh = size * 1.32;
     const left = w * 0.018;
-    const bottom = h * 0.9;
+    // prompt sits near the bottom edge; the log grows upward from it
+    const bottom = h - Math.max(size * 0.8, h * 0.025);
     const top = h * 0.02;
     ctx.save();
     ctx.textBaseline = 'alphabetic';
@@ -69,7 +72,8 @@ export class TerminalOverlay {
     // lay lines out from the bottom up; verdict rows get a little air for their color band.
     // Older lines fade so only the recent past stays readable.
     let y = bottom - lh * 2;
-    for (let i = this.lines.length - 1; i >= 0; i--) {
+    let rows = 0;
+    for (let i = this.lines.length - 1; i >= 0 && rows < this.maxRows; i--, rows++) {
       const line = this.lines[i]!;
       const big = VERDICT_KINDS.has(line.kind);
       const rowH = big ? lh * 1.25 : lh;
