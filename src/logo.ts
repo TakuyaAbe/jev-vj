@@ -62,8 +62,8 @@ export class LogoOverlay {
     return Math.max(8, Math.min(max, (100 * maxW) / w100));
   }
 
-  /** @param visibleW stage width not covered by the side panel; the logo centers and fits inside it */
-  draw(ctx: CanvasRenderingContext2D, w: number, h: number, now: number, input: RenderInput, visibleW = w): void {
+  /** @param visibleW / visibleH stage area not covered by the panel (side panel on desktop, bottom sheet on phones); the logo centers and fits inside it */
+  draw(ctx: CanvasRenderingContext2D, w: number, h: number, now: number, input: RenderInput, visibleW = w, visibleH = h): void {
     const IN = 420;
     const OUT = 380;
     let k: number; // 0..1 presence
@@ -74,8 +74,8 @@ export class LogoOverlay {
     const ease = k < 1 ? 1 - Math.pow(1 - k, 3) : 1;
 
     const cx = visibleW / 2;
-    const cy = h / 2;
-    const jpSize = this.fitSize(ctx, this.jp, this.jpFont(100), visibleW * 0.86, h * 0.2);
+    const cy = visibleH / 2;
+    const jpSize = this.fitSize(ctx, this.jp, this.jpFont(100), visibleW * 0.86, visibleH * 0.2);
     const enSize = this.fitSize(ctx, this.en, this.enFont(100), visibleW * 0.86, jpSize * 0.32, 0.32);
     const bandH = jpSize * 2.6;
     const pulse = 1 + input.beatPulse * 0.035 * (0.5 + input.intensity);
