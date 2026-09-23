@@ -171,6 +171,7 @@ export function makeHinaDan3d(): Scene {
     id: 'hina_dan3d',
     group: 'hina',
     month: 3,
+    short: '3月・ひな祭り（3D）。華やか・象徴的。見せ場・決め場',
     name: 'Hina Dan 3D (three.js)',
     description: 'ひな祭り素材（3D）。立体の七段飾りをカメラがゆっくり回り込み、お内裏様・三人官女・五人囃子がビートで揺れ、ぼんぼりの灯りが低域で明滅する。金屏風と舞う花びら。見せ場や決め場に向く',
     render(ctx, input) {
