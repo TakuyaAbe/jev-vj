@@ -15,8 +15,8 @@ export interface Settings {
   logRows: number;
   context: string;
   fontShuffle: { enabled: boolean; intervalSec: number; beatSync: boolean };
-  /** scene ids Jev may pick; null = all */
-  enabledScenes: string[] | null;
+  /** scene ids Jev may pick; 'all' = every scene; null = never chosen (default: the 年中行事 set) */
+  enabledScenes: string[] | 'all' | null;
   /** scene list order from edit mode; empty = default */
   sceneOrder: string[];
 }

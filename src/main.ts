@@ -259,7 +259,7 @@ beat.onBar = (info) => {
   director.onBar(info.bar, elapsed());
 };
 
-const saveEnabledScenes = (): void => saveSettings({ enabledScenes: director.enabledScenes.size ? [...director.enabledScenes] : null });
+const saveEnabledScenes = (): void => saveSettings({ enabledScenes: director.enabledScenes.size ? [...director.enabledScenes] : 'all' });
 
 const cbs: UiCallbacks = {
   async playDemo() {
@@ -486,10 +486,19 @@ void (async () => {
     userPlugins = [];
   }
   for (const p of userPlugins) await addPluginText(p.name, p.text, false);
-  if (settings.enabledScenes) {
+  if (Array.isArray(settings.enabledScenes)) {
     for (const id of settings.enabledScenes) if (SCENES.some((sc) => sc.id === id)) director.enabledScenes.add(id);
-    ui.setEnabledScenes(director.enabledScenes);
+  } else if (settings.enabledScenes === null) {
+    // first visit: only the 年中行事 scenes (3D + 和柄) are candidates
+    for (const sc of SCENES) if (sc.month) director.enabledScenes.add(sc.id);
   }
+  ui.setEnabledScenes(director.enabledScenes);
+  // open on a candidate: this month's 3D 年中行事 scene when it is in the set
+  const month = new Date().getMonth() + 1;
+  const cands = director.candidates();
+  const opener = cands.find((sc) => sc.month === month && sc.group !== 'wagara' && sc.id !== 'hina_mochi') ?? cands[0];
+  if (opener && !cands.includes(director.state.scene)) director.state.scene = opener;
+  ui.setActiveScene(director.state.scene.id);
   prewarm((failed) => {
     for (const f of failed) logError(`${f.id}: コンパイル失敗 ${f.error.split('\n')[0]}`);
   });
