@@ -99,5 +99,7 @@ function spotifyNowPlaying(): Plugin {
 
 export default defineConfig({
   plugins: [jevProxy(), spotifyNowPlaying()],
+  resolve: { dedupe: ['three'] },
+  build: { rollupOptions: { input: { main: 'index.html', kv: 'kv.html' } } },
   server: { host: '127.0.0.1', fs: { allow: ['.', process.env.HOME ?? '/'] } },
 });

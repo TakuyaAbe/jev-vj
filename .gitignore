@@ -16,3 +16,7 @@ video/public/audio
 video/.venv
 video/.capture-frames
 .DS_Store
+
+# Blender intermediate render frames (regenerate with blender/hina_pizza.py --anim)
+blender/anim/frames/
+*.blend1
