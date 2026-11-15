@@ -11,6 +11,7 @@ import juliaFrag from './shaders/julia.frag?raw';
 import voronoiFrag from './shaders/voronoi.frag?raw';
 import mochiFrag from './shaders/mochi.frag?raw';
 import seigaihaFrag from './shaders/seigaiha.frag?raw';
+import hinaPizzaFrag from './shaders/hina-pizza.frag?raw';
 
 const frag = (body: string): string => `${common}\n${body}`;
 
@@ -221,7 +222,16 @@ export const seigaiha = makeShaderScene({
   frag: frag(seigaihaFrag),
 });
 
+export const hinaPizza = makeShaderScene({
+  id: 'hina_pizza',
+  group: 'hina',
+  month: 3,
+  name: 'Hina Pizza (GLSL)',
+  description: 'ひな祭り素材。bakuro domino club presents HINAMATSURI のキービジュアル。菱餅・桃色サラミ・バジルをのせたピザと三段の緋毛氈。ビートで一切れが飛び出し金の縁が光り、低域でチーズがとろける。ポップで象徴的。見せ場やイベントの顔として合う',
+  frag: frag(hinaPizzaFrag),
+});
+
 export const galaxy = makeGalaxy();
 export const terrain = makeTerrain();
 export const hinaDan3d = makeHinaDan3d();
-export const GL_SCENES: Scene[] = [warp, lattice, julia, voronoi, galaxy, terrain, hinaMochi, seigaiha, hinaDan3d];
+export const GL_SCENES: Scene[] = [warp, lattice, julia, voronoi, galaxy, terrain, hinaMochi, seigaiha, hinaPizza, hinaDan3d];

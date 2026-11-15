@@ -144,6 +144,7 @@ export const SCENE_SHORT: Partial<Record<SceneId, string>> = {
   hina_dan: 'ひな祭り: 七段飾り2D。象徴的。見せ場・決め場',
   hina_mochi: 'ひな祭り: 菱餅タイル（GLSL）。ポップ。ドロップ・安定',
   seigaiha: 'ひな祭り: 青海波（GLSL）。和・静か。イントロ・ブレイク',
+  hina_pizza: 'ひな祭り: 菱餅ピザと三段の緋毛氈（GLSL、イベントKV）。ポップ・象徴的。見せ場・ドロップ',
   hina_dan3d: 'ひな祭り: 七段飾り3D、カメラ回り込み。見せ場・決め場',
 };
 
